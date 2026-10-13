@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "purpose": "Development fixtures only. No VINs, ownership records, or verified repair specifications.",
+  "vehicles": [
+    {"year": 2001, "make": "Toyota", "model": "Tundra", "engine": null, "trim": null},
+    {"year": 2020, "make": "Honda", "model": "Civic", "engine": null, "trim": null},
+    {"year": 2015, "make": "Lexus", "model": "GS 350", "engine": "3.5L V6", "trim": "F Sport"},
+    {"year": 2006, "make": "Ford", "model": "F-150", "engine": "4.6L V8", "trim": null}
+  ]
+}

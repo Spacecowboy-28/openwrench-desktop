@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openwrench-desktop"
+version = "0.1.0.dev1"
+description = "Offline automotive workshop desktop foundation"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+dependencies = ["PySide6-Essentials==6.8.3", "shiboken6==6.8.3"]
+
+[project.gui-scripts]
+openwrench = "openwrench.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
