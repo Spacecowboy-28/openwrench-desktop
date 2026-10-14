@@ -7,11 +7,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QScrollArea,
 )
 
 from openwrench import __version__
+from openwrench.garage_ui import GaragePage
 from openwrench.storage import SCHEMA_VERSION, Store
+from openwrench.transfers import export_garage
 
 
 def label(text: str, name: str = '') -> QLabel:
@@ -45,8 +47,8 @@ class MainWindow(QMainWindow):
         self.navigation.setAccessibleName('Main navigation')
         self.navigation.addItems(['My Garage', 'Settings'])
         side.addWidget(self.navigation)
-        side.addWidget(label('OFFLINE\nNo account required', 'muted'))
-        side.addWidget(label(f'Foundation build {__version__}', 'muted'))
+        side.addWidget(label('LOCAL DATA\nNo account required', 'muted'))
+        side.addWidget(label(f'Garage build {__version__}', 'muted'))
         layout.addWidget(sidebar)
         self.pages = QStackedWidget()
         layout.addWidget(self.pages, 1)
@@ -67,26 +69,8 @@ class MainWindow(QMainWindow):
         return page, layout
 
     def garage_page(self) -> QWidget:
-        page, layout = self.page('My Garage', 'A private workspace for your vehicles and repair records.')
-        panel = QFrame()
-        panel.setObjectName('card')
-        body = QVBoxLayout(panel)
-        body.setContentsMargins(25, 25, 25, 25)
-        body.addWidget(label('Desktop foundation ready', 'heading'))
-        body.addWidget(label('This development build establishes local storage, application settings, backups, and desktop packaging.'))
-        body.addSpacing(12)
-        body.addWidget(label('Vehicle entry arrives in Milestone 2.\nThis build contains no vehicle records or repair specifications.', 'muted'))
-        layout.addWidget(panel)
-        layout.addWidget(label('Development sequence', 'heading'))
-        for title, detail in [
-            ('02  Vehicle Garage', 'Vehicle entry, VIN lookup, mileage, and restore'),
-            ('03  Repair Library + Maintenance', 'Source-linked information and imported documents'),
-            ('04  Diagnostics', 'Simulator first, then read-only USB communication'),
-            ('05  Guided Repairs', 'Evidence-based misfire and electrical workflows'),
-        ]:
-            layout.addWidget(label(f'{title}\n{detail}', 'muted'))
-        layout.addStretch()
-        return page
+        self.garage = GaragePage(self.store, self)
+        return self.garage
 
     def settings_page(self) -> QWidget:
         page, layout = self.page('Settings', 'Control appearance and inspect your local workspace.')
@@ -101,10 +85,23 @@ class MainWindow(QMainWindow):
         path = label(str(self.store.path), 'muted')
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(path)
-        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups currently contain application settings.'))
+        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups contain settings, vehicles, history, and cached VIN results.'))
         self.backup_button = QPushButton('Save database backup…')
         self.backup_button.clicked.connect(self.choose_backup)
-        layout.addWidget(self.backup_button)
+        self.restore_button = QPushButton('Restore database…')
+        self.restore_button.clicked.connect(self.choose_restore)
+        backup_row = QHBoxLayout()
+        backup_row.addWidget(self.backup_button)
+        backup_row.addWidget(self.restore_button)
+        layout.addLayout(backup_row)
+        export_row = QHBoxLayout()
+        self.json_button = QPushButton('Export Garage JSON…')
+        self.csv_button = QPushButton('Export Garage CSV ZIP…')
+        self.json_button.clicked.connect(lambda: self.choose_export('json'))
+        self.csv_button.clicked.connect(lambda: self.choose_export('csv'))
+        export_row.addWidget(self.json_button)
+        export_row.addWidget(self.csv_button)
+        layout.addLayout(export_row)
         self.check_button = QPushButton('Check database')
         self.check_button.clicked.connect(self.check_database)
         layout.addWidget(self.check_button)
@@ -112,8 +109,46 @@ class MainWindow(QMainWindow):
         self.result.setAccessibleName('Storage action result')
         layout.addWidget(self.result)
         layout.addStretch()
-        layout.addWidget(label(f'OpenWrench {__version__} · MIT project license\nQt for Python uses separate LGPLv3 terms. See THIRD_PARTY.md.\nNo telemetry, online service, or vehicle connection runs in this build.', 'muted'))
-        return page
+        layout.addWidget(label(f'OpenWrench {__version__} · MIT project license\nQt for Python uses separate LGPLv3 terms. See THIRD_PARTY.md.\nVIN lookup contacts NHTSA only on request. No telemetry or adapter connection.', 'muted'))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(page)
+        return scroll
+
+    def choose_export(self, kind):
+        default, filter_text = ('openwrench-garage.json', 'JSON (*.json)') if kind == 'json' else ('openwrench-garage-csv.zip', 'CSV ZIP (*.zip)')
+        filename, _ = QFileDialog.getSaveFileName(self, 'Export Garage', default, filter_text)
+        if not filename:
+            return
+        try:
+            export_garage(self.store, Path(filename), kind)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            QMessageBox.critical(self, 'Export failed', str(error))
+            return
+        self.result.setText(f'Garage export saved: {filename}')
+
+    def choose_restore(self):
+        filename, _ = QFileDialog.getOpenFileName(self, 'Choose an OpenWrench backup', '', 'SQLite database (*.sqlite3 *.db);;All files (*)')
+        if not filename:
+            return
+        answer = QMessageBox.question(self, 'Replace this workspace?',
+            'Restore replaces all current vehicles, history, settings, and VIN cache with this backup. '
+            'A schema-1 backup contains settings only. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            safety = self.store.restore(Path(filename))
+        except (OSError, ValueError, sqlite3.Error) as error:
+            QMessageBox.critical(self, 'Restore failed', str(error))
+            return
+        self.garage.refresh()
+        self.theme.blockSignals(True)
+        self.theme.setCurrentText(self.store.theme)
+        self.theme.blockSignals(False)
+        self.apply_theme(self.store.theme)
+        self.result.setText(f'Database restored. Previous workspace saved to: {safety}')
 
     def change_theme(self, theme: str) -> None:
         try:

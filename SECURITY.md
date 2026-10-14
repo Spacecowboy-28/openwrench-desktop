@@ -1,8 +1,11 @@
 # Security
 
-This pre-release stores data locally without encryption and does not contact a
-server. Protect backups as local files. Future VIN/network providers must run only
-after an explicit user action and explain what leaves the machine.
+This pre-release stores local data and backups without encryption. VIN lookup
+contacts NHTSA only after an explicit Decode action. The form explains the VIN
+and year transmission before the button. Requests use HTTPS, refuse redirects,
+and have a 15-second deadline. Results remain in a local 30-day cache. Deleting
+a vehicle does not purge the independent decode cache. Logs do not record VINs.
+Protect the database and backups as private records. No telemetry exists.
 
 No vehicle communication or ECU write operations exist in this version.
 The future diagnostic boundary is read-only. Treat malformed documents, adapter

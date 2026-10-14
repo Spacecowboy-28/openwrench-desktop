@@ -1,11 +1,13 @@
 # Roadmap
 
-- Milestone 1: native shell, architecture, repository preparation, storage
-  foundation, tests and build pipeline. Local validation passed. Remote
-  setup blocked on creation and connection of a GitHub repository.
-- Milestone 2: functional Garage. Manual vehicle CRUD, four development profiles,
-  VIN decoding with error handling, odometer records, backup/restore, JSON/CSV
-  export. Keep unknown engine and trim fields null.
+- Milestone 1: native shell, architecture, storage foundation and build pipeline.
+  Merged into main through PR #1.
+- Milestone 2: Vehicle Garage implemented on dev/milestone-2 for review. Native
+  vehicle CRUD, optional starting profiles, asynchronous VIN lookup, mileage and
+  service history, validation, schema migration and tests. Backups include all
+  Garage data. JSON/CSV exports and validated restore with safety backup and
+  rollback complete the requested scope in PR #3, pending review and desktop
+  acceptance of the new controls. Unknown engine/trim fields stay null.
 - Milestone 3: repair and maintenance library. Licensed imports, provenance,
   applicability, PDF text indexing, diagrams, schedules, reminders, data schemas.
 - Milestone 4: deterministic simulator, persisted diagnostic sessions and plots,

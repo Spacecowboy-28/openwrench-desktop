@@ -1,59 +1,58 @@
 # Development status
 
-Session: 2026-10-13. Version: 0.1.0.dev1. Branch: `dev/milestone-1`.
+Session: 2026-10-14 (UTC). Version: 0.2.0.dev2.
+Branch: `dev/milestone-2`, based on merged main
+`76c15985a16330b156095a490c8c84da097d8a53`.
 
-## Scope
+## Completed scope
 
-Milestone 1 local implementation exists. GitHub publication and Windows build
-verification remain blocked or pending. This is a desktop foundation, not a
-repair-data release or a completed garage/diagnostic application.
+Milestone 1 merged through PR #1. The existing PySide6 shell, SQLite database,
+test suite, build pipeline and Git history remain intact.
 
-Implemented: native Qt shell, functional Settings page, persistent dark/light
-theme, SQLite schema migration, newer-schema rejection, integrity check, verified
-backups with overwrite prevention and failed-write cleanup, rotating logs,
-startup failures, isolated native smoke test, provider and read-only diagnostic
-interfaces, package metadata, source/wheel build, same-platform PyInstaller
-build, Windows/Linux CI workflow, contribution/security/research/license docs.
+Vehicle Garage now supports native add/edit/view/delete forms, optional starting
+profiles, manual offline entry, optional vPIC VIN decoding, dated mileage and
+service records, editable history, costs/currencies, notes and deletion
+confirmation. No user records are seeded. Tundra/Civic engine and trim stay blank.
 
-No simulated data or scan is presented as a real result. No personal VINs,
-documents or records are included. Four public development vehicle profiles
-retain unknown configurations as null. They do not represent repair coverage.
+Schema 1 → 2 creates a verified pre-upgrade backup and preserves settings. UUID
+records, foreign keys, unique VIN/name constraints and transactional chronology
+checks protect local records. Existing backups include Garage data and VIN cache.
+VIN lookup is asynchronous, bounded and cancellable. Cache entries expire after
+30 days. Returned data requires review before filling blank form fields.
 
-## Verification
+Settings now exports versioned JSON and related CSV tables in a ZIP. Stable UUIDs,
+units, dates and integer costs/currency survive export. Validated SQLite restore
+supports schema 1/2, confirmation, a mandatory safety backup, transactional rollback
+and immediate Garage/theme refresh. The Garage heading uses singular for one vehicle.
 
-Final results are recorded in docs/TEST_RESULTS.md after the validation pass.
-Linux is the only platform available locally. Offscreen Qt rendering proves the
-event loop and widget construction, not interaction with a physical display,
-clean Windows installation or USB adapter. GitHub Actions has not run yet.
+## Validation and delivery
 
-## GitHub
+Local tests: 83 passed. Source distribution, wheel and Linux native bundle built.
+See `docs/MILESTONE_2.md` for evidence and manual review steps.
+Changes update existing PR #3 from dev/milestone-2 to main. The user
+must review and merge. No installer, release or automatic merge is authorized.
+GitHub CI is authoritative for the remote commit's Windows/Linux build status.
 
-Connected profile lookup succeeded. Accessible repository list was empty.
-Available tools offered no repository-creation operation. No remote, pull
-request, release or installer was published. Local commits and a Git bundle
-preserve the development branch until an accessible repository exists.
-See docs/GITHUB_SETUP.md for the concrete next step.
+## Remaining limitations
 
-## Exact next implementation task
+- JSON/CSV import is not implemented. Restore accepts only supported OpenWrench
+  SQLite schemas up to 256 MiB; CSV represents null and empty text identically.
+- Export/restore run synchronously; large workspaces could briefly pause the UI.
+- Service attachments, schedules and repair specifications belong to Milestone 3.
+- VIN validation checks format, not the checksum. vPIC reports decode issues.
+  Partial/invalid results never enable Apply. Older short identifiers need a
+  blank VIN and notes. Server availability and regional coverage vary.
+- The cache is independent of vehicle deletion and holds VIN responses locally.
+- Odometer rollover/replacement and unit conversion are not implemented. Units
+  lock after history exists. Same-day readings lack time ordering.
+- Costs use integer cents and a three-letter currency label, without conversion.
+- No hardware communication, public installer, signing or binary license audit.
+- Tests use synthetic VINs and controlled replies, not private owner records.
 
-After connecting the new repository and running its Windows/Linux CI, begin
-Milestone 2 with a transactionally migrated `vehicles` table and native
-add/edit/delete forms. Add an odometer-event table with units and timestamps,
-UUID identifiers, validation, deletion confirmation and reopen/persistence
-tests. Exercise the four example profiles and an unrelated vehicle. Do not
-seed user data automatically. Then implement a background vPIC provider with
-timeouts, caching, retained decode errors and manual fallback, followed by
-validated restore and JSON/CSV export. Keep VINs out of logs and public fixtures.
+## Exact next task
 
-## Remaining gates
-
-- Windows native build and startup checks after repository access.
-- Physical-display Linux and clean-machine Windows testing.
-- Installer/upgrade/uninstall testing and complete native-bundle license/source
-  compliance before binary distribution in milestone 6.
-- Actual hardware access for USB testing in milestone 4.
-- Source-rights and vehicle-applicability review before technical-data imports.
-- Dependency vulnerability review and exact platform lockfiles before release.
-
-Build/run commands are in README.md. Do not infer installer or hardware success
-from a source test or an offscreen smoke test.
+Review PR #3 without automatic merge. The user confirmed Windows Python 3.12.10
+startup, persistence, live NHTSA decoding, mileage, service editing, integrity,
+backup, both themes and all 60 baseline tests at fb2258c. New export/restore
+controls still need Windows desktop acceptance using the checklist in
+`docs/MILESTONE_2.md`. After review and merge, begin Milestone 3.

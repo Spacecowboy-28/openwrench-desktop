@@ -1,45 +1,19 @@
-# GitHub setup and handoff
+# Repository workflow
 
-The connected GitHub account was reachable, but repository listing returned no
-accessible repositories. The exposed connector has no repository-create action.
-No remote was created, no files were pushed, and no PR or release was published.
+The repository exists at https://github.com/Spacecowboy-28/openwrench-desktop .
+Milestone 1 merged through PR #1. Historical bundle-import instructions are
+superseded by the existing Git history. Do not recreate or reinitialize it.
 
-Create a public repository named `openwrench-desktop` through GitHub's New
-Repository page: https://github.com/new . Leave README, license and gitignore
-initialization unchecked if you will push the prepared Git history below.
-Give the connected GitHub app access to the repository, then provide its URL
-in the next Work session. Do not grant access to unrelated repositories.
+Milestone 2 starts from main commit 76c15985a16330b156095a490c8c84da097d8a53
+on `dev/milestone-2`. Review its pull request and CI before a manual merge.
 
-The handoff archive contains `openwrench-history.bundle` plus the readable source.
-To preserve the prepared commit history with local Git:
+To test the development branch on your computer with an existing clone:
 
 ```sh
-git clone -b dev/milestone-1 openwrench-history.bundle openwrench-desktop
-cd openwrench-desktop
-git remote remove origin
-git remote add origin https://github.com/YOUR_USERNAME/openwrench-desktop.git
-git push origin main
-git push -u origin dev/milestone-1
+git fetch origin
+git switch dev/milestone-2
+git pull --ff-only origin dev/milestone-2
 ```
 
-Authenticate through your normal Git credential manager. Do not paste access
-tokens into chat, source files, or shell commands. Open a PR from
-`dev/milestone-1` to `main`. CI runs tests and builds on Windows and Linux.
-The source branch contains the development work, while main contains the initial
-license/README baseline. Review successful CI before merging.
-
-If the next session uses only GitHub file tools, initialize the new repository
-with a README instead. The assistant must inspect its initial commit, preserve
-it, and upload the prepared files to a new development branch. Do not force-push
-over this initial history. A Git bundle is unnecessary for this alternative.
-
-Suggested PR title: `Add native desktop foundation and local persistence`
-
-Suggested PR body:
-
-OpenWrench needs a desktop foundation before vehicle records and diagnostic
-drivers. This adds a Python/Qt shell, SQLite settings and migrations, verified
-database backups, dark/light themes, logging, failure handling, and Windows/Linux
-build checks. Research and license decisions document the native-stack choice.
-Vehicle editing and scans are intentionally outside this milestone. See
-DEVELOPMENT_STATUS.md for local test evidence and platform limitations.
+Preserve uncommitted local changes before switching branches. Follow README.md
+for the virtual environment, tests and application launch. Never force-push main.

@@ -15,7 +15,6 @@ def main():
         '--specpath', str(ROOT / 'build'), '--distpath', str(ROOT / 'dist'),
         '--workpath', str(ROOT / 'build' / 'pyinstaller'),
         '--exclude-module', 'PySide6.QtQml', '--exclude-module', 'PySide6.QtQuick',
-        '--exclude-module', 'PySide6.QtNetwork',
         str(ROOT / 'scripts' / 'desktop_entry.py'),
     ], check=True, cwd=ROOT)
     destination = ROOT / 'dist' / 'OpenWrench'
