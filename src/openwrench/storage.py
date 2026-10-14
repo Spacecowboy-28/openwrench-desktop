@@ -1,12 +1,13 @@
-"""Local persistence. No UI, networking, vehicle data, or credentials here."""
+"""Local persistence, versioned schema migration and coherent backups."""
 
 from contextlib import closing
 from pathlib import Path
 import os
 import sqlite3
 import tempfile
+from uuid import uuid4
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Store:
@@ -32,9 +33,39 @@ class Store:
             self.connection.execute("SELECT key, value FROM settings LIMIT 1")
             if self.theme not in ('light', 'dark'):
                 raise ValueError("Invalid theme in the local database.")
+            if version < 2:
+                if version == 1:
+                    self.backup(self.path.with_name(f'{self.path.stem}.pre-v2-{uuid4().hex}.sqlite3'))
+                self._migrate_garage()
+            self.connection.row_factory = sqlite3.Row
         except Exception:
             self.connection.close()
             raise
+
+    def _migrate_garage(self) -> None:
+        with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
+            self.connection.execute('''CREATE TABLE vehicles (
+                id TEXT PRIMARY KEY, nickname TEXT NOT NULL,
+                name_key TEXT NOT NULL UNIQUE, vin TEXT UNIQUE,
+                year INTEGER NOT NULL CHECK(year BETWEEN 1886 AND 9999),
+                make TEXT NOT NULL, model TEXT NOT NULL,
+                engine TEXT, trim TEXT, notes TEXT NOT NULL DEFAULT '',
+                unit TEXT NOT NULL CHECK(unit IN ('mi','km')),
+                created_at TEXT NOT NULL)''')
+            self.connection.execute('''CREATE TABLE entries (
+                id TEXT PRIMARY KEY, vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL CHECK(kind IN ('mileage','service')),
+                date TEXT NOT NULL, odometer INTEGER CHECK(odometer >= 0),
+                title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+                cost_cents INTEGER CHECK(cost_cents >= 0), currency TEXT NOT NULL,
+                CHECK(kind != 'mileage' OR odometer IS NOT NULL))''')
+            self.connection.execute('CREATE INDEX entries_vehicle_date ON entries(vehicle_id,date)')
+            self.connection.execute('''CREATE TABLE vin_cache (
+                vin TEXT NOT NULL, model_year INTEGER NOT NULL,
+                payload TEXT NOT NULL, fetched_at TEXT NOT NULL,
+                PRIMARY KEY(vin,model_year))''')
+            self.connection.execute('PRAGMA user_version=2')
 
     @property
     def theme(self) -> str:

@@ -61,3 +61,17 @@ Data lives outside the installation directory. Database migrations run before
 window construction. Reject newer schema versions. Before future destructive
 migrations, create and verify a backup, migrate in a transaction, and retain a
 recovery path. Current migration only creates an empty settings database.
+
+## Milestone 2 extension
+
+`garage.py` owns validated vehicle/history operations over the existing Store.
+`garage_ui.py` owns native forms, tables and delete confirmation. `vpic.py` uses
+QtNetwork's asynchronous event loop, so VIN lookups do not block the UI or move
+SQLite connections across threads. Closing a form or changing VIN/year aborts
+in-flight requests. A reply never applies automatically to a changed vehicle.
+
+Schema 2 adds UUID vehicles, unified dated mileage/service entries and VIN cache.
+Foreign keys cascade history on vehicle deletion. VINs and normalized Garage
+names have unique indexes. Monetary values use integer cents. Units live on the
+vehicle and lock after history starts. Mileage chronology checks run inside an
+IMMEDIATE transaction. No unsupported ECU or repair-data functions were added.

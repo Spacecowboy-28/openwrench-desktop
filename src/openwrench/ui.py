@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from openwrench import __version__
+from openwrench.garage_ui import GaragePage
 from openwrench.storage import SCHEMA_VERSION, Store
 
 
@@ -45,8 +46,8 @@ class MainWindow(QMainWindow):
         self.navigation.setAccessibleName('Main navigation')
         self.navigation.addItems(['My Garage', 'Settings'])
         side.addWidget(self.navigation)
-        side.addWidget(label('OFFLINE\nNo account required', 'muted'))
-        side.addWidget(label(f'Foundation build {__version__}', 'muted'))
+        side.addWidget(label('LOCAL DATA\nNo account required', 'muted'))
+        side.addWidget(label(f'Garage build {__version__}', 'muted'))
         layout.addWidget(sidebar)
         self.pages = QStackedWidget()
         layout.addWidget(self.pages, 1)
@@ -67,26 +68,8 @@ class MainWindow(QMainWindow):
         return page, layout
 
     def garage_page(self) -> QWidget:
-        page, layout = self.page('My Garage', 'A private workspace for your vehicles and repair records.')
-        panel = QFrame()
-        panel.setObjectName('card')
-        body = QVBoxLayout(panel)
-        body.setContentsMargins(25, 25, 25, 25)
-        body.addWidget(label('Desktop foundation ready', 'heading'))
-        body.addWidget(label('This development build establishes local storage, application settings, backups, and desktop packaging.'))
-        body.addSpacing(12)
-        body.addWidget(label('Vehicle entry arrives in Milestone 2.\nThis build contains no vehicle records or repair specifications.', 'muted'))
-        layout.addWidget(panel)
-        layout.addWidget(label('Development sequence', 'heading'))
-        for title, detail in [
-            ('02  Vehicle Garage', 'Vehicle entry, VIN lookup, mileage, and restore'),
-            ('03  Repair Library + Maintenance', 'Source-linked information and imported documents'),
-            ('04  Diagnostics', 'Simulator first, then read-only USB communication'),
-            ('05  Guided Repairs', 'Evidence-based misfire and electrical workflows'),
-        ]:
-            layout.addWidget(label(f'{title}\n{detail}', 'muted'))
-        layout.addStretch()
-        return page
+        self.garage = GaragePage(self.store, self)
+        return self.garage
 
     def settings_page(self) -> QWidget:
         page, layout = self.page('Settings', 'Control appearance and inspect your local workspace.')
@@ -101,7 +84,7 @@ class MainWindow(QMainWindow):
         path = label(str(self.store.path), 'muted')
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(path)
-        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups currently contain application settings.'))
+        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups contain settings, vehicles, history, and cached VIN results.'))
         self.backup_button = QPushButton('Save database backup…')
         self.backup_button.clicked.connect(self.choose_backup)
         layout.addWidget(self.backup_button)
@@ -112,7 +95,7 @@ class MainWindow(QMainWindow):
         self.result.setAccessibleName('Storage action result')
         layout.addWidget(self.result)
         layout.addStretch()
-        layout.addWidget(label(f'OpenWrench {__version__} · MIT project license\nQt for Python uses separate LGPLv3 terms. See THIRD_PARTY.md.\nNo telemetry, online service, or vehicle connection runs in this build.', 'muted'))
+        layout.addWidget(label(f'OpenWrench {__version__} · MIT project license\nQt for Python uses separate LGPLv3 terms. See THIRD_PARTY.md.\nVIN lookup contacts NHTSA only on request. No telemetry or adapter connection.', 'muted'))
         return page
 
     def change_theme(self, theme: str) -> None:

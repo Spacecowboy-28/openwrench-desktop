@@ -11,7 +11,7 @@ about the latest upstream versions or long-term support.
 | --- | --- | --- | --- | --- |
 | CPython | 3.12 baseline; local 3.12.14 | PSF-2.0 plus bundled notices | https://github.com/python/cpython | Runtime; maintained CPython line, patch updates needed |
 | SQLite | Python runtime dependent; record exact build in test report | Public domain | https://sqlite.org/src | Standard-library sqlite3; maintained upstream, tied to Python distribution |
-| PySide6-Essentials / Qt | 6.8.3 | LGPLv3/GPL/commercial choices, LGPLv3 selected for included modules | https://code.qt.io/pyside/pyside-setup.git | Dynamic QtCore/QtGui/QtWidgets bindings; official Qt project; tested older baseline, no current support guarantee |
+| PySide6-Essentials / Qt | 6.8.3 | LGPLv3/GPL/commercial choices, LGPLv3 selected for included modules | https://code.qt.io/pyside/pyside-setup.git | Dynamic QtCore/QtGui/QtWidgets/QtNetwork bindings; official Qt project; tested older baseline, no current support guarantee |
 | shiboken6 | 6.8.3 | LGPLv3/GPL/commercial choices | https://code.qt.io/pyside/pyside-setup.git | Required binding runtime, same Qt maintenance caveat |
 | PyInstaller | 6.16.0 | GPL-2.0-or-later with bootloader exception | https://github.com/pyinstaller/pyinstaller | Build-only; bootloader in native bundle; active upstream, pinned baseline |
 | pyinstaller-hooks-contrib | 2026.8 | GPL-2.0-or-later with stated exception / per-file terms | https://github.com/pyinstaller/pyinstaller-hooks-contrib | Build hooks; audit copied runtime hooks before release |
@@ -46,3 +46,11 @@ SQLite license: https://sqlite.org/copyright.html
 The MIT project license does not relicense dependencies. No GPL-only OBD library
 is included. Optional plugins and sidecars still need whole-distribution review.
 Future automotive candidates and adoption decisions appear in `docs/RESEARCH.md`.
+
+## Milestone 2
+
+No new third-party Python dependency. QtNetwork, already present in PySide6
+Essentials, supplies asynchronous HTTPS. NHTSA vPIC is an external optional
+service, not bundled code or a service-manual source. API documentation:
+https://vpic.nhtsa.dot.gov/api/ . The native bundle now includes QtNetwork and
+its TLS plugins, which must join the existing pre-release binary license audit.
