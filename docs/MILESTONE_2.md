@@ -34,7 +34,7 @@ cached response. Unknown engine/trim remain empty.
 
 The local cache lasts 30 days per VIN/year. Tests control replies to stay
 deterministic and avoid sending private or fabricated owner data to the service.
-Live service reliability and clean-machine TLS behavior need user acceptance.
+The user confirmed live VIN decoding on Windows Python 3.12.10 for the baseline.
 
 ## Migration and recovery
 
@@ -48,7 +48,7 @@ The test suite covers both successful upgrade and injected migration failure.
 
 Local Linux x86_64 validation, Python 3.12 and PySide6 6.8.3:
 
-- 60 tests passed in 1.73 seconds.
+- 83 tests passed, including the original 60 regression tests.
 - Source distribution and wheel: built with `python -m build --no-isolation`.
 - Linux native directory bundle: built with `python scripts/build_desktop.py`.
 - Qt offscreen Garage and add-vehicle forms visually inspected.
@@ -80,4 +80,40 @@ in the public repository. Use an isolated workspace for acceptance tests.
 
 The bundled Linux executable also launched from outside the source directory
 with Qt's offscreen platform. It returned exit 0, `visible: true`, version
-`0.2.0.dev1` and schema 2. This validates native startup, not a physical display.
+`0.2.0.dev2` and schema 2. This validates native startup, not a physical display.
+
+## Export and restore acceptance
+
+The user reported baseline Windows Python 3.12.10 acceptance at commit fb2258c:
+startup, persisted vehicles, live VIN decoding, mileage, service creation/editing,
+SQLite integrity/backup, both themes and all 60 baseline tests. The new controls
+require a separate Windows desktop check; automated Qt tests run offscreen.
+
+The 23 added tests cover JSON/CSV values and joins, Unicode and multiline text,
+formula escaping, empty Garage export, refusal to overwrite files, partial-write
+cleanup, malformed records/backups, schema incompatibility, unexpected triggers,
+orphan records, restoration of UUIDs/settings/cache/history, schema-1 private
+migration, failure rollback, safety-backup failure, cancellation, Garage refresh,
+theme/integrity controls and singular/plural headings. Existing tests still cover
+vehicle/service editing, deletion confirmation and migration rollback.
+
+Use a disposable workspace and synthetic records for these steps:
+
+1. Export JSON and CSV ZIP with vehicles in mi and km, dated readings and service
+   records with/without costs. Check IDs, dates, currencies and integer cents.
+2. Extract CSV files and join history.vehicle_id to vehicles.id. Check Unicode,
+   multiline notes and the documented formula-prefix escaping.
+3. Save a SQLite backup, add a test vehicle, cancel Restore and verify no change.
+4. Restore the backup and confirm the new vehicle disappears, original IDs and
+   history remain, theme refreshes, and the reported safety backup exists.
+5. Restore the safety backup to recover the test vehicle; restart and check data.
+6. Try a text file, unrelated SQLite database and newer-schema file. All should
+   report failure without replacing records. Never edit your real database.
+7. Check one-vehicle grammar, edit a service, cancel a delete, change themes and
+   run integrity checks after restoration.
+
+Restore supports exact application schemas 1/2 up to 256 MiB and preserves the
+selected source. Schema 1 restores settings and an empty Garage. Export is not
+an import or full recovery format. JSON preserves null versus empty text; CSV
+uses empty cells for both. Large transfers run synchronously. No schema bump is
+needed for these features; existing schema-2 records remain unchanged.

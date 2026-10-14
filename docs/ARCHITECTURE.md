@@ -60,7 +60,7 @@ macOS needs a native build runner and testing before claiming support.
 Data lives outside the installation directory. Database migrations run before
 window construction. Reject newer schema versions. Before future destructive
 migrations, create and verify a backup, migrate in a transaction, and retain a
-recovery path. Current migration only creates an empty settings database.
+recovery path. Schema 1 to 2 adds Garage tables with a pre-upgrade snapshot.
 
 ## Milestone 2 extension
 
@@ -75,3 +75,11 @@ Foreign keys cascade history on vehicle deletion. VINs and normalized Garage
 names have unique indexes. Monetary values use integer cents. Units live on the
 vehicle and lock after history starts. Mileage chronology checks run inside an
 IMMEDIATE transaction. No unsupported ECU or repair-data functions were added.
+
+`transfers.py` creates a consistent read snapshot for JSON/CSV export and validates
+backup schema and records. Restore opens the selected file read-only, snapshots
+and migrates it in a temporary workspace, then replaces records transactionally
+through the original Store connection. Existing Garage objects keep their valid
+connection. A verified safety backup precedes replacement; concurrent commits
+from another connection cause cancellation. Strict schema matching rejects extra
+triggers, views and tables. No imported schema executes against the live workspace.

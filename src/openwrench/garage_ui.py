@@ -277,7 +277,8 @@ class GaragePage(QWidget):
             for column, value in enumerate(values):
                 self.table.setItem(index, column, QTableWidgetItem(value))
         self.table.blockSignals(False)
-        self.summary.setText(f'{len(self.records)} vehicles · Local records' if self.records else 'Your Garage is empty. Add a vehicle to start recording mileage and service.')
+        count = len(self.records)
+        self.summary.setText(f'{count} {"vehicle" if count == 1 else "vehicles"} · Local records' if count else 'Your Garage is empty. Add a vehicle to start recording mileage and service.')
         if self.records:
             selected = next((i for i, r in enumerate(self.records) if r['id'] == select_id), 0)
             self.table.selectRow(selected)

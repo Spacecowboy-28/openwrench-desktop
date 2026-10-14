@@ -115,3 +115,39 @@ class Store:
 
     def close(self) -> None:
         self.connection.close()
+
+    def restore(self, source: Path) -> Path:
+        """Restore validated records transactionally, retaining connection identity."""
+        from openwrench.transfers import validated_backup
+        source = Path(source).resolve()
+        if source == self.path or (source.exists() and os.path.samefile(source, self.path)):
+            raise ValueError('Choose a backup other than the active database.')
+        if self.connection.in_transaction:
+            raise ValueError('Finish the current database operation before restoring.')
+        with tempfile.TemporaryDirectory(prefix='openwrench-restore-') as temporary:
+            records = validated_backup(source, Path(temporary))
+            revision = self.connection.execute('PRAGMA data_version').fetchone()[0]
+            safety = self.path.with_name(f'{self.path.stem}.pre-restore-{uuid4().hex}.sqlite3')
+            self.backup(safety)  # An unsuccessful safety backup stops the restore.
+            try:
+                with self.connection:
+                    self.connection.execute('BEGIN IMMEDIATE')
+                    if self.connection.execute('PRAGMA data_version').fetchone()[0] != revision:
+                        raise ValueError('Another process changed this workspace. Close other app instances and retry.')
+                    self._replace_records(records)
+                    if self.connection.execute('PRAGMA foreign_key_check').fetchone() or self.integrity() != 'ok':
+                        raise ValueError('Restored data failed integrity validation.')
+            except Exception as error:
+                # The transaction context rolls back all deletes and inserts.
+                raise ValueError(f'Restore failed. SQLite rolled back the changes. Safety backup: {safety}') from error
+        return safety
+
+    def _replace_records(self, records):
+        """Run only inside the restore transaction, using fixed table names."""
+        for table in ('entries', 'vehicles', 'vin_cache', 'settings'):
+            self.connection.execute(f'DELETE FROM {table}')
+        for table in ('settings', 'vehicles', 'entries', 'vin_cache'):
+            columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info({table})')]
+            placeholders = ','.join('?' for _ in columns)
+            self.connection.executemany(f'INSERT INTO {table} VALUES ({placeholders})',
+                                        ([record[column] for column in columns] for record in records[table]))

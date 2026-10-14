@@ -1,7 +1,7 @@
 # OpenWrench Desktop
 
 A local, open-source automotive workshop application. Current development
-version: **0.2.0.dev1, Vehicle Garage**.
+version: **0.2.0.dev2, Vehicle Garage**.
 
 Add, view, edit and delete vehicles in the existing native PySide6 application.
 Record dated odometer readings and service history, including notes, parts,
@@ -26,7 +26,8 @@ hardware driver yet. No server, browser, subscription or account is required.
 5. Select a vehicle to view details. Use **Log mileage** or **Add service** to
    add records. Select a history row to edit or delete it. Deletion asks for
    confirmation. Vehicle deletion also removes its history.
-6. Use Settings to save a complete SQLite backup.
+6. Use Settings to export Garage JSON or a ZIP of related CSV files, save a complete
+   SQLite backup, or restore a validated backup after confirmation.
 
 VIN lookup uses asynchronous Qt networking, a 15-second deadline and a local
 30-day cache. Invalid/partial decodes display NHTSA's message instead of filling
@@ -108,9 +109,25 @@ backup beside it, then migrates transactionally. Existing settings survive.
 Newer schemas cause a startup failure instead of a downgrade.
 
 Backups use SQLite's snapshot API and refuse to overwrite existing files.
-Restore UI and JSON/CSV export remain Garage follow-up work. To inspect a backup,
-close the application, copy it into a separate workspace as `openwrench.sqlite3`,
-and launch with `--data-dir` pointing to the workspace. Preserve the original.
+In Settings, **Restore database** accepts unmodified OpenWrench schema 1 or 2
+backups up to 256 MiB. Confirmation defaults to No. Restore validates schema,
+integrity, foreign keys and record values before saving a unique adjacent
+`*.pre-restore-*.sqlite3` safety backup. Replacement runs in one SQLite transaction;
+failure rolls back changes. The Garage and theme refresh immediately. Schema-1
+backups contain settings only, so restoring one replaces the Garage with an
+empty Garage. Newer, unrelated or modified schemas are rejected. Restore the
+safety backup through the same interface to undo a successful restoration.
+
+**Export Garage JSON** retains exact text, nulls, UUIDs, ISO dates/timestamps,
+mi/km units and integer `cost_cents` with currency. **Export Garage CSV ZIP**
+contains `vehicles.csv`, `odometer_readings.csv`, `service_history.csv`, a versioned
+manifest and field guidance. Join each record's `vehicle_id` to `vehicles.id`.
+CSV uses UTF-8 with BOM, empty cells for absent values and an extra apostrophe
+before formula-like text or leading apostrophes. Remove one leading apostrophe
+programmatically to recover escaped text. JSON distinguishes null from empty text.
+Exports refuse to overwrite existing files. Neither format includes settings or
+VIN cache, and neither is an import format; use SQLite backup/restore for recovery.
+Backups and exports contain private vehicle information. Store them accordingly.
 
 Replacing the application directory leaves
 user data intact. No automatic updater exists yet. Logs rotate at 500 KB with
