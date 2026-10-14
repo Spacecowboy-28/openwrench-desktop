@@ -41,6 +41,7 @@ def create_library(db):
             id TEXT PRIMARY KEY, vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
             title TEXT NOT NULL, distance_interval INTEGER, months_interval INTEGER,
             unit TEXT NOT NULL, origin TEXT NOT NULL, source TEXT NOT NULL, publication TEXT NOT NULL,
+            publisher TEXT NOT NULL, publication_date TEXT NOT NULL, rights TEXT NOT NULL, reviewed_at TEXT NOT NULL,
             conditions TEXT NOT NULL, specification TEXT NOT NULL, applicability TEXT NOT NULL,
             last_entry_id TEXT REFERENCES entries(id) ON DELETE SET NULL,
             baseline_date TEXT NOT NULL, baseline_odometer INTEGER,

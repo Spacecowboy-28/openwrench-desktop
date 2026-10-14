@@ -150,7 +150,8 @@ def test_schedule_service_links_due_and_month_end(library):
 def test_applicability(vehicle,expected):
     reference=dict(year=2015,make='Lexus',model='GS 350',drivetrain='AWD')
     assert applicability(vehicle,reference)==expected
-    if expected=='Candidate match':assert applicability(vehicle,reference,True)=='Verified applicability'
+    if expected=='Candidate match':assert applicability(dict(vehicle,engine='3.5L V6'),reference,True)=='Verified applicability'
+    if expected=='Candidate match':assert applicability(vehicle,reference,True)=='Partial match'
     assert applicability(vehicle,{})=='Unknown applicability'
 
 
@@ -266,3 +267,14 @@ def test_readonly_copy_recovery_after_restore_to_other_directory(library,tmp_pat
         copy=Library(target).local_path(identifier)
         assert copy.exists() and copy.parent.parent==target.path.parent
         assert Library(target).search('brake')
+
+
+def test_encrypted_pdf_rejected(library,tmp_path):
+    import base64
+    # Original synthetic one-page fixture, encrypted solely for rejection testing.
+    content=base64.b64decode('JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDYwMWM1YWE3ZjA+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAxMDAgMTAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViAyCi9SIDMKL0xlbmd0aCAxMjgKL1AgNDI5NDk2NzI5MgovRmlsdGVyIC9TdGFuZGFyZAovTyA8NTQyMTc4Zjk2YTVhYWFmNmZlMGFmYzMzYzU1ZTFjOGQ0YTc2NDllZDY4NDU2YzRjMjdiMDc5NGRlOGM0ZTc5Yz4KL1UgPGY1NDZiNGUzYjA1ZmI3YTYyYjEwMzJmYmJmOTM5NzhiMjhiZjRlNWU0ZTc1OGE0MTY0MDA0ZTU2ZmZmYTAxMDg+Cj4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA1OSAwMDAwMCBuIAowMDAwMDAwMTE4IDAwMDAwIG4gCjAwMDAwMDAxNjcgMDAwMDAgbiAKMDAwMDAwMDI2MSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDYKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDMwMzkzNTMzMzE2NjYzMzg2MTM3MzAzMTYzMzczMDYyMzc2MzM3MzIzMzMwMzAzNjM4MzUzNjMyMzYzODY0NjM+IDwzMDM5MzUzMzMxNjY2MzM4NjEzNzMwMzE2MzM3MzA2MjM3NjMzNzMyMzMzMDMwMzYzODM1MzYzMjM2Mzg2NDYzPiBdCi9FbmNyeXB0IDUgMCBSCj4+CnN0YXJ0eHJlZgo0NzYKJSVFT0YK')
+    source=tmp_path/'encrypted.pdf';source.write_bytes(content)
+    lib,vehicle=library
+    with pytest.raises(ValueError,match='password protected'):
+        lib.import_document(source,details(),[vehicle])
+    assert not lib.documents()

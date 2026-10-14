@@ -17,11 +17,13 @@ def plus_months(value, months):
 def schedule_values(store, data):
     vehicle = Garage(store).vehicle(data['vehicle_id'])
     result = {k: text(data.get(k, ''), k, 2000) for k in
-              ('title','source','publication','conditions','specification','baseline_date','origin')}
+              ('title','source','publication','publisher','publication_date','rights','reviewed_at','conditions','specification','baseline_date','origin')}
     if not result['title'] or result['origin'] not in ('User-defined','Manufacturer source (user verified)'):
         raise ValueError('Enter a service name and source type.')
-    if result['origin'] != 'User-defined' and not all(result[k] for k in ('source','publication')):
-        raise ValueError('Manufacturer schedules require source and publication references.')
+    if result['origin'] != 'User-defined' and not all(result[k] for k in ('source','publication','publisher','rights','reviewed_at')):
+        raise ValueError('Manufacturer schedules require source, publication, publisher, rights and review date.')
+    for key in ('publication_date','reviewed_at'):
+        if result[key]:validated_date(result[key])
     result['vehicle_id'] = vehicle['id']
     result['unit'] = data.get('unit',vehicle['unit'])
     if result['unit'] not in ('mi','km'):

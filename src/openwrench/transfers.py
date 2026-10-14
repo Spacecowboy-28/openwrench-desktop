@@ -28,9 +28,9 @@ def schema_signature(db):
         "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name")]
 
 
-def read_tables(db):
+def read_tables(db, tables=TABLES):
     result = {}
-    for table in TABLES:  # Fixed identifiers only, never supplied by an import.
+    for table in tables:  # Fixed identifiers only, never supplied by an import.
         cursor = db.execute(f'SELECT * FROM {table}')
         names = [item[0] for item in cursor.description]
         result[table] = [dict(zip(names, row)) for row in cursor]
@@ -47,7 +47,7 @@ def valid_timestamp(value):
         raise ValueError('Backup contains an invalid timestamp.')
 
 
-def validate_records(data):
+def validate_records(data, include_content=True):
     """Reject malformed values and relationships before export or restore."""
     try:
         settings = {row['key']: row['value'] for row in data['settings']}
@@ -124,7 +124,7 @@ def validate_records(data):
             if not isinstance(payload, dict) or not isinstance(payload.get('Results'), list):
                 raise ValueError('Invalid cache payload.')
         from openwrench.library import validate_library_records
-        validate_library_records(data)
+        validate_library_records(data, include_content)
     except (KeyError, TypeError, AttributeError, OverflowError) as error:
         raise ValueError('Database contains malformed Garage data.') from error
 
@@ -135,8 +135,8 @@ def garage_document(store):
         raise ValueError('Finish the current database operation before exporting.')
     with db:
         db.execute('BEGIN')
-        data = read_tables(db)
-    validate_records(data)
+        data = read_tables(db, ('settings','vehicles','entries','vin_cache',*METADATA_TABLES))
+    validate_records(data, include_content=False)
     units = {v['id']: v['unit'] for v in data['vehicles']}
     vehicles = [{k: v[k] for k in VEHICLE_FIELDS} for v in sorted(data['vehicles'], key=lambda v: v['id'])]
     records = [dict(row, distance_unit=units[row['vehicle_id']]) for row in sorted(data['entries'], key=lambda r: (r['vehicle_id'], r['date'], r['id']))]

@@ -236,7 +236,7 @@ class Library:
         return identifier
 
 
-def validate_library_records(data):
+def validate_library_records(data, include_content=True):
     """Validate restore payload without interpreting imported executable schema."""
     from openwrench.transfers import valid_id, valid_timestamp
     documents = {}
@@ -253,16 +253,16 @@ def validate_library_records(data):
             raise ValueError('Invalid indexing status.')
         documents[doc['id']] = doc
     files = set()
-    for row in data['document_files']:
+    for row in data.get('document_files',[]):
         doc = documents.get(row['document_id'])
         value = row['content']
         if not doc or not isinstance(value,bytes) or len(value)>MAX_PDF_BYTES or not value.startswith(b'%PDF-') or hashlib.sha256(value).hexdigest()!=doc['sha256']:
             raise ValueError('Missing or damaged document content.')
         files.add(doc['id'])
-    if files != set(documents):
+    if include_content and files != set(documents):
         raise ValueError('Backup lacks document content.')
     sizes = {}
-    for row in data['document_pages']:
+    for row in data.get('document_pages',[]):
         doc = documents.get(row['document_id'])
         if not doc:
             raise ValueError('Orphan document page.')
@@ -295,20 +295,20 @@ def validate_library_records(data):
         valid_id(row['id'])
         if row['vehicle_id'] not in vehicles or row['unit'] not in ('mi','km'):
             raise ValueError('Invalid schedule owner or units.')
-        for key in ('title','source','publication','conditions','specification'):
+        for key in ('title','source','publication','publisher','publication_date','rights','reviewed_at','conditions','specification'):
             text(row[key],key,2000,key=='title')
         if row['origin'] not in ('User-defined','Manufacturer source (user verified)'):
             raise ValueError('Invalid schedule source type.')
-        if row['origin']!='User-defined' and not (row['source'] and row['publication']):
+        if row['origin']!='User-defined' and not all(row[k] for k in ('source','publication','publisher','rights','reviewed_at')):
             raise ValueError('Missing manufacturer source.')
         for key,maximum in (('distance_interval',10000000),('months_interval',1200)):
             if row[key] is not None:
                 integer(row[key],key,1,maximum)
         if row['distance_interval'] is None and row['months_interval'] is None:
             raise ValueError('Missing schedule interval.')
-        if row['baseline_date']:
-            from openwrench.garage import validated_date
-            validated_date(row['baseline_date'])
+        from openwrench.garage import validated_date
+        for key in ('baseline_date','publication_date','reviewed_at'):
+            if row[key]:validated_date(row[key])
         if row['baseline_odometer'] is not None:
             integer(row['baseline_odometer'],'Odometer',0,10000000)
         if row['last_entry_id']:

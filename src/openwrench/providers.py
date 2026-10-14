@@ -11,6 +11,9 @@ class VehicleIdentity:
     model: str
     engine: str | None = None
     trim: str | None = None
+    drivetrain: str | None = None
+    transmission: str | None = None
+    engine_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,8 @@ def applicability(vehicle, requirement, verified=False):
         elif str(actual).strip().casefold() != str(requirement[key]).strip().casefold():
             return 'Not applicable'
     if missing or not all(requirement.get(k) for k in ('year', 'make', 'model')):
+        return 'Partial match'
+    if verified and any(not vehicle.get(k) for k in ('engine', 'drivetrain')):
         return 'Partial match'
     return 'Verified applicability' if verified else 'Candidate match'
 
@@ -95,6 +100,10 @@ class NhtsaProvider:
                     'https://www.nhtsa.gov/nhtsa-datasets-and-apis#manufacturer-communications', {},
                     content_type='Manufacturer communications / TSB references', rights='See NHTSA data policy',
                     verification='Official NHTSA portal')]
+
+
+class ReferenceProvider(Protocol):
+    def references(self, vehicle: dict) -> list[OnlineReference]: ...
 
 
 PROVIDERS = (LemonProvider(), CharmProvider(), NhtsaProvider())

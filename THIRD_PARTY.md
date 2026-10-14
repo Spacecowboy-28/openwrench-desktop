@@ -54,3 +54,22 @@ Essentials, supplies asynchronous HTTPS. NHTSA vPIC is an external optional
 service, not bundled code or a service-manual source. API documentation:
 https://vpic.nhtsa.dot.gov/api/ . The native bundle now includes QtNetwork and
 its TLS plugins, which must join the existing pre-release binary license audit.
+
+## Milestone 3
+
+pypdfium2 5.14.0 adds local PDF extraction and raster rendering. Upstream:
+https://github.com/pypdfium2-team/pypdfium2 and
+https://pypdfium2.readthedocs.io/en/stable/readme.html#licensing .
+pypdfium2 offers Apache-2.0/BSD-3-Clause licensing. PDFium uses a BSD-style license
+and includes dependencies under additional terms. The build script collects
+pypdfium2/PDFium package data and the installed distribution's license notices.
+The existing full binary-license audit still gates public releases.
+Standard wheels omit JavaScript/XFA. No Pillow, pypdf, QtPdf or AGPL renderer is
+required at runtime. Synthetic encrypted test data was generated with pypdf;
+pypdf is not a project dependency and the fixture contains no external content.
+
+LEMON and CHARM integrations only open external links. Their site availability
+and public visibility do not grant redistribution or automated-use permission.
+NHTSA recall queries use its documented single-vehicle year/make/model endpoint.
+Manufacturer communications remain official browser/dataset references.
+See docs/MILESTONE_3_SOURCES.md for dated research and limitations.
