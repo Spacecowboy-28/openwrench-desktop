@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from uuid import uuid4
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Store:
@@ -37,6 +37,10 @@ class Store:
                 if version == 1:
                     self.backup(self.path.with_name(f'{self.path.stem}.pre-v2-{uuid4().hex}.sqlite3'))
                 self._migrate_garage()
+            if version < 3:
+                if version > 0:
+                    self.backup(self.path.with_name(f'{self.path.stem}.pre-v3-{uuid4().hex}.sqlite3'))
+                self._migrate_library()
             self.connection.row_factory = sqlite3.Row
         except Exception:
             self.connection.close()
@@ -66,6 +70,12 @@ class Store:
                 payload TEXT NOT NULL, fetched_at TEXT NOT NULL,
                 PRIMARY KEY(vin,model_year))''')
             self.connection.execute('PRAGMA user_version=2')
+
+    def _migrate_library(self):
+        from openwrench.library_schema import create_library
+        with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
+            create_library(self.connection)
 
     @property
     def theme(self) -> str:
@@ -144,10 +154,14 @@ class Store:
 
     def _replace_records(self, records):
         """Run only inside the restore transaction, using fixed table names."""
-        for table in ('entries', 'vehicles', 'vin_cache', 'settings'):
+        from openwrench.library_schema import LIBRARY_TABLES, rebuild_fts
+        self.connection.execute('DELETE FROM library_fts')
+        for table in (*reversed(LIBRARY_TABLES), 'entries', 'vehicles', 'vin_cache', 'settings'):
             self.connection.execute(f'DELETE FROM {table}')
-        for table in ('settings', 'vehicles', 'entries', 'vin_cache'):
+        for table in ('settings', 'vehicles', 'entries', 'vin_cache', *LIBRARY_TABLES):
             columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info({table})')]
             placeholders = ','.join('?' for _ in columns)
             self.connection.executemany(f'INSERT INTO {table} VALUES ({placeholders})',
                                         ([record[column] for column in columns] for record in records[table]))
+
+        rebuild_fts(self.connection)
