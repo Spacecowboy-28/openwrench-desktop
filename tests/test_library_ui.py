@@ -89,3 +89,36 @@ def test_recalls_validation_and_timeout(app):
         with pytest.raises(ValueError):parse_recalls(malformed)
     client=RecallClient();received=[];client.completed.connect(lambda rows,message:received.append(message))
     client.timeout();assert 'timed out' in received[0]
+
+
+@pytest.mark.parametrize('status,network_error',[(200,0),(503,0),(302,0),(0,1)])
+def test_recall_network_results_and_failures(app,status,network_error):
+    from PySide6.QtCore import Signal
+    from PySide6.QtNetwork import QNetworkReply
+    from test_vpic import FakeReply,FakeManager
+    class Reply(FakeReply):
+        readyRead=Signal()
+        def readAll(self):
+            value,self.body=self.body,b''
+            return value
+    body=json.dumps(dict(results=[dict(NHTSACampaignNumber='26V000000',ReportReceivedDate='',Component='Test',Summary='Synthetic')])).encode()
+    reply=Reply(body,status,QNetworkReply.NetworkError.HostNotFoundError if network_error else QNetworkReply.NetworkError.NoError)
+    client=RecallClient();client.manager=FakeManager(reply)
+    received=[];client.completed.connect(lambda rows,message:received.append((rows,message)))
+    client.fetch(dict(year=2006,make='Ford',model='F-150',vin='PRIVATE_NOT_SENT'))
+    assert 'PRIVATE' not in client.manager.request.url().toString()
+    reply.finished.emit()
+    assert received and client.reply is None
+    assert bool(received[0][0])==(status==200 and not network_error)
+
+
+def test_recall_cancel_ignores_stale_reply(app):
+    from PySide6.QtCore import Signal
+    from test_vpic import FakeReply,FakeManager
+    class Reply(FakeReply):readyRead=Signal()
+    reply=Reply(b'{"results":[]}')
+    client=RecallClient();client.manager=FakeManager(reply)
+    received=[];client.completed.connect(lambda *a:received.append(a))
+    client.fetch(dict(year=2001,make='Toyota',model='Tundra'))
+    client.cancel();reply.finished.emit()
+    assert reply.aborted and not received

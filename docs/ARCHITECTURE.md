@@ -26,8 +26,8 @@ Qt deployment: https://doc.qt.io/qtforpython-6/deployment/index.html
 `ui.py` renders native widgets and delegates persistence to `Store`.
 `storage.py` owns transactions, schema checks and SQLite snapshots.
 `providers.py` defines typed vehicle applicability and repair-source boundaries.
-`diagnostics.py` defines a read-only adapter contract. Neither contract module
-implements a vehicle driver or data service yet.
+`diagnostics.py` defines a read-only adapter contract. The diagnostic contract does not implement a vehicle driver. Repair providers
+now expose metadata and external references, without a scraper or content mirror.
 
 Future serial, network, PDF indexing and polling work must use a worker thread
 or process with bounded timeouts and Qt signals back to the UI. SQLite connections
@@ -83,3 +83,49 @@ through the original Store connection. Existing Garage objects keep their valid
 connection. A verified safety backup precedes replacement; concurrent commits
 from another connection cause cancellation. Strict schema matching rejects extra
 triggers, views and tables. No imported schema executes against the live workspace.
+
+## Milestone 3 extension
+
+`library_schema.py` defines transactional schema 3. `library.py` validates
+provenance and associations, stores documents, manages FTS5 page search and
+recovers viewing files. `maintenance.py` owns explicit schedule/baseline rules.
+`providers.py` exposes a ReferenceProvider protocol and provider registry, alongside
+the original contracts. Plugins return OnlineReference metadata without changing
+core UI/storage. Provider exceptions become availability messages.
+
+`library_ui.py` supplies native tabs, forms and a QGraphicsView page viewer.
+`library_tasks.py` starts QProcess jobs; `pdf_worker.py` owns per-process SQLite
+connections and `pdf_engine.py` performs PDFium extraction/rendering. PDFium is
+not called concurrently in GUI threads. Rendering has a 30-second deadline,
+other document tasks five minutes. Cancellation terminates the worker. SQLite
+transactions preserve either the complete committed import or no partial import.
+A cancelled late task might already have committed; the UI refreshes and says so.
+No PDF JavaScript, links or embedded attachments execute in the viewer.
+
+Documents have UUIDs and unique SHA-256 hashes. The database holds canonical PDF
+bytes and indexed page text, so SQLite backup/restore is an atomic recovery unit.
+The adjacent `<database stem>.documents` directory holds content-addressed viewing
+copies. Missing copies regenerate offline. Existing changed copies are never
+silently overwritten, and removing records leaves cached files for explicit user
+cleanup. Original import paths are never deletion targets.
+
+Schema 3 adds vehicle_configuration, documents, document_files, document_vehicles,
+document_pages, bookmarks and schedules, plus FTS5 and its shadow tables/indexes.
+Foreign keys preserve vehicle ownership and clear removed procedure/service links.
+Restoration validates app schema, record metadata, hashes, ownership and size
+limits in an isolated copy. It rebuilds FTS from validated page records within the
+same replacement transaction, retaining existing Store/Garage handles.
+Export format 2 includes user-owned metadata, UUID relationships and provenance,
+but omits document bytes and extracted text. Export does not load PDF blobs.
+
+Maintenance uses explicit intervals. It follows a selected service record's date
+and odometer, and captures a baseline snapshot when linked. Deleting the service
+clears the link but retains the saved baseline; users edit the baseline to remove
+it. Schedules never infer completion from similar service titles. A unit mismatch
+prevents mileage due comparisons, and time intervals clamp to month end.
+Reminders run when the Repair Library refreshes, not as an OS/background service.
+
+`recalls.py` uses asynchronous QtNetwork for explicit year/make/model NHTSA
+requests, with deadline/size/redirect bounds and stale-reply cancellation.
+LEMON/CHARM remain browser-only providers due unresolved coverage/access rights.
+No data from a model response substitutes for manufacturer technical information.

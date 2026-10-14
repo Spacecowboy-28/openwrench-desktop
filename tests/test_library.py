@@ -79,6 +79,8 @@ def test_duplicate_metadata_association_and_missing_file(library,tmp_path):
     changed=dict(details(),title='Revised')
     lib.save_metadata(identifier,changed,[vehicle,second])
     assert len(lib.associations(identifier))==2
+    assert lib.documents(second,'Brakes','Revised')[0]['id']==identifier
+    assert not lib.documents(second,'Engine','Revised')
     assert lib.search('brake',second)
     with lib.db:
         lib.db.execute('DELETE FROM document_files WHERE document_id=?',(identifier,))
@@ -278,3 +280,26 @@ def test_encrypted_pdf_rejected(library,tmp_path):
     with pytest.raises(ValueError,match='password protected'):
         lib.import_document(source,details(),[vehicle])
     assert not lib.documents()
+
+
+def test_initial_ford_provider_requires_unknown_configuration():
+    vehicle=dict(year=2006,make='Ford',model='F-150',engine='4.6L V8')
+    refs,_=online_references(vehicle)
+    manuals=[r for r in refs if r.requirements]
+    assert len(manuals)==2
+    assert all(applicability(vehicle,r.requirements)=='Partial match' for r in manuals)
+    assert applicability(dict(vehicle,drivetrain='4WD',engine_code='VIN W'),manuals[0].requirements)=='Not applicable'
+
+
+def test_library_restore_failure_rolls_back_index_and_documents(library,tmp_path,monkeypatch):
+    lib,vehicle=library
+    lib.import_document(synthetic_pdf(tmp_path/'input.pdf'),details(),[vehicle])
+    source=lib.store.backup(tmp_path/'safe.sqlite3')
+    before=read_tables(lib.db)
+    def fail(records):
+        lib.db.execute('DELETE FROM library_fts')
+        lib.db.execute('DELETE FROM documents')
+        raise sqlite3.OperationalError('injected restore failure')
+    monkeypatch.setattr(lib.store,'_replace_records',fail)
+    with pytest.raises(ValueError,match='rolled back'):lib.store.restore(source)
+    assert read_tables(lib.db)==before and lib.search('brake')

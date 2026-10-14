@@ -2,14 +2,14 @@
 
 - Milestone 1: native shell, architecture, storage foundation and build pipeline.
   Merged into main through PR #1.
-- Milestone 2: Vehicle Garage implemented on dev/milestone-2 for review. Native
-  vehicle CRUD, optional starting profiles, asynchronous VIN lookup, mileage and
-  service history, validation, schema migration and tests. Backups include all
-  Garage data. JSON/CSV exports and validated restore with safety backup and
-  rollback complete the requested scope in PR #3, pending review and desktop
-  acceptance of the new controls. Unknown engine/trim fields stay null.
-- Milestone 3: repair and maintenance library. Licensed imports, provenance,
-  applicability, PDF text indexing, diagrams, schedules, reminders, data schemas.
+- Milestone 2: Vehicle Garage, VIN lookup, mileage/service history, validation,
+  migration, JSON/CSV export and validated restore. Merged through PR #3;
+  desktop acceptance passed as reported by the user.
+- Milestone 3: native Repair Library implemented on dev/milestone-3 for review.
+  Local PDFs, page search/viewing, bookmarks, conservative applicability,
+  external provider references, NHTSA recall requests, user-defined/cited
+  maintenance schedules, schema-3 recovery and metadata exports.
+  Physical Windows acceptance and provider coverage remain explicit review items.
 - Milestone 4: deterministic simulator, persisted diagnostic sessions and plots,
   then a documented read-only USB ELM/STN driver with capability checks.
 - Milestone 5: versioned misfire and electrical diagnostic decision trees.
