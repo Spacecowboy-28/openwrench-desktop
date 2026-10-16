@@ -7,7 +7,7 @@ Add, view, edit and delete vehicles in the existing native PySide6 application.
 Record dated odometer readings and service history, including notes, parts,
 optional cost and currency. SQLite stores all records locally. Internet access
 is optional. Explicit NHTSA VIN/recall requests and external repair-source links
-use the network; imported PDFs and their text search work offline.
+use the network; imported PDF/HTML manuals and their text search work offline.
 
 The application ships no factory repair specifications, simulated scans or
 hardware driver. Users supply lawful manuals and source-backed schedules. No server, browser, subscription or account is required.
@@ -45,13 +45,13 @@ three-letter currency code. It does not convert currencies or calculate totals.
 
 Choose a Garage vehicle, then **Open Repair Library**, or use the sidebar.
 
-- **Local manuals:** Import a lawful PDF, enter its title/category and provenance,
+- **Local manuals:** Import a lawful PDF, HTML/HTM entry page or HTML ZIP archive, enter its title/category and provenance,
   and select one or more vehicle associations. Edit details to change associations.
   Leave unknown applicability fields blank. An association is not factory verification.
 - Search document titles/descriptions and extracted page text. Results identify
   documents and pages. Categories and the selected vehicle filter results. Choose
   **All vehicles** to browse unassociated documents as well.
-- **Open PDF:** Change page or zoom, drag to pan diagrams, search extracted text,
+- **Open document (PDF):** Change page or zoom, drag to pan diagrams, search extracted text,
   bookmark a page, or open the recovered local file in your system PDF viewer.
 - **Rebuild index** re-extracts the selected PDF without replacing metadata. A
   failed/cancelled reindex preserves the previous index. Image-only PDFs report
@@ -153,7 +153,7 @@ backup beside it, then migrates transactionally. Existing settings survive.
 Newer schemas cause a startup failure instead of a downgrade.
 
 Backups use SQLite's snapshot API and refuse to overwrite existing files.
-In Settings, **Restore database** accepts unmodified OpenWrench schema 1, 2 or 3
+In Settings, **Restore database** accepts unmodified OpenWrench schema 1, 2, 3 or 4
 backups up to 1 GiB. Confirmation defaults to No. Restore validates schema,
 integrity, foreign keys and record values before saving a unique adjacent
 `*.pre-restore-*.sqlite3` safety backup. Replacement runs in one SQLite transaction;
@@ -170,13 +170,13 @@ manifest and field guidance. Join each record's `vehicle_id` to `vehicles.id`.
 CSV uses UTF-8 with BOM, empty cells for absent values and an extra apostrophe
 before formula-like text or leading apostrophes. Remove one leading apostrophe
 programmatically to recover escaped text. JSON distinguishes null from empty text.
-Export format 2 adds document metadata, vehicle configuration/associations,
-bookmarks and schedules. It excludes PDF bytes and extracted third-party text.
+Export format 3 adds document metadata, vehicle configuration/associations,
+bookmarks and schedules. It excludes document bytes and extracted third-party text.
 Exports refuse to overwrite existing files. Neither format includes settings or
 VIN cache, and neither is an import format; use SQLite backup/restore for recovery.
 Backups and exports contain private vehicle information. Store them accordingly.
 
-SQLite backups include PDF bytes, page text and all library metadata. They are
+SQLite backups include PDF bytes, complete imported HTML bundles, page text and all library metadata. They are
 private recovery files, not redistribution archives. Viewing copies live in the
 adjacent `openwrench.documents` directory, named by SHA-256. The database holds
 canonical recovery bytes so backup/restore is self-contained across computers.
@@ -213,3 +213,43 @@ Milestones 1 and 2 merged through PR #1 and PR #3. Milestone 3 uses
 `dev/milestone-3` and references Issue #2. Keep the issue open through acceptance
 testing. Do not merge automatically. See DEVELOPMENT_STATUS.md and
 docs/MILESTONE_3.md for scope, tests and remaining work.
+
+## Offline HTML manuals (Milestone 3 extension)
+
+Use **Import PDF / HTML / ZIP** in Repair Library. Select an HTML/HTM entry page
+inside a local folder, or a ZIP containing a manual. An entry-page import collects
+reachable files below its parent directory only; use ZIP for a full supplied
+folder tree. Originals remain untouched. Enter source, rights and vehicle
+associations yourself; a title is not proof of completeness or vehicle fit.
+
+**Open document** provides static HTML navigation, Back/Forward/Home, section
+selection, zoom and section bookmarks. Search results show the document UUID
+relationship, file path and section, then open the matching section. The resource
+report lists missing files/anchors and blocked external URLs. No missing reference
+report proves completeness: absent script-generated navigation is unknowable.
+
+The native QTextBrowser renderer has no JavaScript engine. Scripts, forms,
+iframes, active SVG and remote/file URLs are blocked. Basic HTML tables, typography,
+CSS and static raster/SVG diagrams work (SVG: UTF-8, up to 1 MiB). Browser layout CSS, script-generated
+content/navigation, CSS imports/background images and embedded multimedia are
+unsupported. Fonts and other accepted supporting files remain in the stored
+bundle but do not gain execution or arbitrary file access. No WebEngine is needed
+for this static scope. User manuals are never scraped or included in the repo.
+
+ZIP limits: 50 MiB compressed, 100 MiB expanded, 10 MiB per member, 2,000 entries,
+200:1 expansion above 1 MiB, 5,000 indexed sections and 20 MiB text. Unsupported
+member extensions reject the archive with a filename. HTML/HTM, CSS, common raster
+images, SVG, JS, TXT, font files, JSON/XML/Markdown/source maps are accepted as
+stored data; only sanitized HTML/CSS and approved images are rendered. Unsafe
+paths, links, special files, Windows aliases, duplicate names and encrypted
+entries reject the archive. Imports run in cancellable worker processes.
+
+Schema 4 adds document format and stable HTML section mappings. Existing PDFs
+retain their IDs/bookmarks. Upgrade creates a pre-v4 SQLite backup; complete
+backups contain bundles and restore recreates missing managed viewing folders.
+JSON and CSV export metadata/section paths only, never manual text or resources.
+Resource reports are recomputed from the stored bundle. Large bundle inspection
+and page rendering still have bounded synchronous UI work.
+
+See [Milestone 3 acceptance](docs/MILESTONE_3.md) for Windows update instructions
+and the offline HTML/PDF acceptance checklist.

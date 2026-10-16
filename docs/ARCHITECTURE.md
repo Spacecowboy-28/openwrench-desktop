@@ -86,7 +86,7 @@ triggers, views and tables. No imported schema executes against the live workspa
 
 ## Milestone 3 extension
 
-`library_schema.py` defines transactional schema 3. `library.py` validates
+`library_schema.py` defines transactional schemas 3 and 4. `library.py` validates
 provenance and associations, stores documents, manages FTS5 page search and
 recovers viewing files. `maintenance.py` owns explicit schedule/baseline rules.
 `providers.py` exposes a ReferenceProvider protocol and provider registry, alongside
@@ -115,7 +115,7 @@ Foreign keys preserve vehicle ownership and clear removed procedure/service link
 Restoration validates app schema, record metadata, hashes, ownership and size
 limits in an isolated copy. It rebuilds FTS from validated page records within the
 same replacement transaction, retaining existing Store/Garage handles.
-Export format 2 includes user-owned metadata, UUID relationships and provenance,
+Export format 3 includes user-owned metadata, UUID relationships and provenance,
 but omits document bytes and extracted text. Export does not load PDF blobs.
 
 Maintenance uses explicit intervals. It follows a selected service record's date
@@ -129,3 +129,29 @@ Reminders run when the Repair Library refreshes, not as an OS/background service
 requests, with deadline/size/redirect bounds and stale-reply cancellation.
 LEMON/CHARM remain browser-only providers due unresolved coverage/access rights.
 No data from a model response substitutes for manufacturer technical information.
+
+
+### Static HTML bundles
+
+`html_bundle.py` validates bounded ZIP entries and reachable local HTML resources,
+canonicalizes bundles, indexes stable file/anchor sections and audits references.
+Schema 4 retains original canonical ZIP bytes in `document_files`; `html_sections`
+maps FTS page integers and bookmarks to paths/anchors. Existing schema-3 DDL stays
+unchanged so strict restore validation recognizes old backups. Migration adds a
+format column (default PDF) and the section table transactionally after a snapshot.
+Restore revalidates bundle bytes and recomputes section mappings before replacement.
+
+`html_ui.py` uses QTextBrowser, never Qt WebEngine. An allowlist strips active HTML,
+URL-bearing CSS and unsupported SVG features. Custom bundle URLs go through a
+resource loader with no superclass/network/local-file fallback; source navigation
+is overridden, and static images have decoded-pixel limits. JS remains inert
+stored data, never executed. Only links within the imported bundle navigate.
+A fresh staging folder plus rename materializes validated files; existing cached
+files must match stored bytes. The viewer reads canonical validated database bytes,
+not arbitrary cached files. Import/extraction remains in the existing QProcess
+worker; sanitized page layout/resource inspection has bounded GUI-thread work.
+
+Qt supports a limited rich-text subset, not general browser layout. This tradeoff
+avoids adding a Chromium scripting/network engine for static documentation:
+https://doc.qt.io/qt-6/qtextbrowser.html
+https://doc.qt.io/qt-6/richtext-html-subset.html

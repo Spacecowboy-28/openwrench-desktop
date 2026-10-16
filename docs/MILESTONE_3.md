@@ -47,7 +47,7 @@ or automatic TSB indexing. Network tests use synthetic responses, not owner VINs
 
 Schema 2 to 3 receives a verified pre-v3 snapshot and transactional DDL. Tests
 inject migration and restore failures and verify rollback/data preservation.
-Schemas 1/2/3 restore through validation, safety backup and transactional data
+Schemas 1/2/3/4 restore through validation, safety backup and transactional data
 replacement. Schema-1/2 restores replace the Repair Library with empty records.
 Schema-3 backups include PDF bytes, metadata, schedules, bookmarks and page text.
 Restore reconstructs FTS. Missing viewing files regenerate from recovered bytes.
@@ -55,7 +55,7 @@ Backup size limit: 1 GiB. Existing Settings backup/restore remains synchronous,
 so large databases briefly pause the interface. Full-library archives/streaming
 recovery for larger collections remain future work.
 
-Export format 2 adds document metadata, associations, configuration, bookmarks
+Export format 3 adds document metadata, associations, configuration, bookmarks
 and schedules, including stable IDs/provenance. It excludes PDF bytes and extracted
 text to avoid accidental third-party content redistribution. Export is not import.
 CSV retains the documented null/empty-text and formula-prefix behavior.
@@ -76,8 +76,8 @@ preservation, malformed schema-3 rejection, document/index rollback, cascade
 relationships, metadata-only exports and portable self-contained restores.
 
 Local source/wheel and native bundles build. CI checks Windows 2022 and Ubuntu
-22.04 using Python 3.12, including packaged startup and actual packaged PDF
-import, page search and rendering via scripts/check_packaged_library.py.
+22.04 using Python 3.12, including packaged startup and actual packaged PDF/HTML
+import, section/page search, extraction, restore and PDF rendering via scripts/check_packaged_library.py.
 Offscreen Qt automation does not establish physical desktop acceptance.
 No physical Windows test has run in this development session.
 
@@ -160,3 +160,50 @@ OCR, online manual downloading/indexing, verified factory-data imports, full TSB
 API ingestion, background OS notifications and collections above the current limits
 need separate follow-up. No diagnostics, installer, signing or release work starts
 in this milestone. Existing Qt and PDFium binary-license review gates still apply.
+
+## Offline HTML extension acceptance
+
+The owner has verified Windows startup and Repair Library search for the prior
+Milestone 3 build. Re-run the following for the HTML extension; offscreen CI is
+not physical Windows acceptance. Never use third-party manuals as public fixtures.
+
+- [x] Original synthetic ZIP with nested HTML/HTM, CSS, JS and SVG imports offline.
+- [x] Direct HTML import collects reachable resources without unrelated files.
+- [x] Missing procedure, image and anchor references appear in a resource report.
+- [x] Relative navigation, Back/Forward, sections, zoom and bookmarks work.
+- [x] FTS results retain UUID, source, file and section and filter by vehicle.
+- [x] Unsafe paths, links, Windows aliases, duplicates and size bombs are rejected.
+- [x] Script/iframe/file/network resources are denied; original static SVG renders.
+- [x] Failed/cancelled imports preserve records and source files.
+- [x] Schema-4 migration failure rolls back and preserves a pre-v4 snapshot.
+- [x] SQLite restore preserves full HTML bundles, associations and bookmarks.
+- [x] Failed restore rolls back; malformed section mappings are rejected.
+- [x] JSON/CSV retain metadata and section paths, excluding manual content.
+- [x] Existing PDF and Garage regression suite passes.
+- [ ] Owner tests a lawfully obtained actual HTML archive on Windows, reviewing
+      missing resources and unsupported navigation rather than assuming completeness.
+- [ ] Owner verifies diagram readability and static formatting for their sources.
+
+For the existing checkout, save a Settings backup, close OpenWrench, preserve
+any local edits, then run in PowerShell:
+
+```powershell
+git fetch origin
+git switch dev/milestone-3
+git pull --ff-only origin dev/milestone-3
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m openwrench
+```
+
+Use the same data directory as your previous successful launch. Schema 4 upgrades
+existing data and makes an adjacent pre-v4 snapshot. A complete SQLite backup
+contains manual content: keep it private and use it within applicable rights.
+Exports are metadata-only, not a restore format. Restoring an older snapshot
+replaces current library records with the snapshot's records after confirmation.
+
+The static renderer intentionally excludes scripting, CSS imports/background
+images, active SVG, browser layout and multimedia. No automatic network or system
+browser fallback exists for HTML. The Resource report examines supplied static
+references, not unavailable script-generated links. The LEMON entry-page title
+alone does not establish completeness, lawful distribution, or vehicle fit.
