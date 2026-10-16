@@ -64,7 +64,7 @@ def read_zip(content, cancelled=lambda: False):
                     raise InterruptedError('Import cancelled.')
                 name = safe_path(info.filename.rstrip('/') if info.is_dir() else info.filename)
                 if info.orig_filename != info.filename:
-                    raise ValueError('NUL in archive name.')
+                    raise ValueError('Archive filename was normalized; original path is unsafe.')
                 for parent in [PurePosixPath(name), *PurePosixPath(name).parents]:
                     spelling = str(parent)
                     previous = spellings.setdefault(spelling.casefold(),spelling)

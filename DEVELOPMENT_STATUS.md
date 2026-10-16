@@ -25,7 +25,7 @@ Windows acceptance of Milestone 2, including its export/restore follow-up.
 
 ## Validation and commits
 
-Baseline: 83 tests passed before changes. Current local suite: 142 passed.
+Baseline: 83 tests passed before changes. Current local suite: 143 passed.
 Source distribution, wheel and Linux native directory bundle built. Packaged
 startup plus actual packaged PDF import, FTS search and rendering passed.
 Native Repair Library and source-tab layouts were inspected with Qt offscreen.

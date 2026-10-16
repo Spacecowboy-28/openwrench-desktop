@@ -33,8 +33,12 @@ def synthetic_html(path):
 @pytest.mark.parametrize('name',['../escape.html','/absolute.html','C:/file.html','a\\b.html','CON.html','a/../b.html','a./b.html','a:stream.html'])
 def test_unsafe_archive_paths(name):
     output=BytesIO()
-    with zipfile.ZipFile(output,'w') as z:z.writestr(name,b'<p>test</p>')
-    with pytest.raises(ValueError):read_zip(output.getvalue())
+    stored_name = name.replace('\\','/')
+    with zipfile.ZipFile(output,'w') as z:z.writestr(stored_name,b'<p>test</p>')
+    # Windows ZipInfo normalizes backslashes on write. Patch both ZIP headers
+    # so every OS tests the same actual unsafe archive, not a normalized fixture.
+    raw = output.getvalue().replace(stored_name.encode(),name.encode())
+    with pytest.raises(ValueError):read_zip(raw)
 
 
 def test_zip_symlink_duplicate_collision_and_bomb():
@@ -263,3 +267,10 @@ def test_local_symlink_is_rejected(tmp_path):
     try:(folder/'linked.html').symlink_to(outside)
     except OSError:pytest.skip('OS denies creating symlinks for this user')
     with pytest.raises(ValueError,match='Symbolic'):import_source(folder/'index.html')
+
+
+def test_svg_disguised_as_raster_cannot_bypass_sanitizer(app):
+    browser=OfflineBrowser({'image.png':b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="file:///private.png"/></svg>'})
+    result=browser.loadResource(QTextDocument.ResourceType.ImageResource,QUrl('bundle:/image.png'))
+    assert result.isEmpty() if hasattr(result,'isEmpty') else result.isNull()
+    browser.close()

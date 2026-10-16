@@ -41,7 +41,10 @@ class OfflineBrowser(QTextBrowser):
                 return QByteArray()
             buffer = QBuffer()
             buffer.setData(QByteArray(data));buffer.open(QIODevice.OpenModeFlag.ReadOnly)
-            reader = QImageReader(buffer)
+            format_name = PurePosixPath(name).suffix.lower().lstrip('.')
+            if format_name == 'jpg': format_name = 'jpeg'
+            reader = QImageReader(buffer,QByteArray(format_name.encode('ascii')))
+            reader.setAutoDetectImageFormat(False)
             size = reader.size()
             if size.isEmpty() or size.width()*size.height()>16000000: return QByteArray()
             return reader.read()
