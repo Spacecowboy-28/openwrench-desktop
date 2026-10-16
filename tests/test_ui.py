@@ -12,7 +12,7 @@ def test_window_navigation_theme_and_restart(app, tmp_path):
     window.show()
     app.processEvents()
     assert window.isVisible()
-    assert window.pages.count() == 2
+    assert window.pages.count() == 3
     window.navigation.setCurrentRow(1)
     assert window.pages.currentIndex() == 1
     window.theme.setCurrentText('light')

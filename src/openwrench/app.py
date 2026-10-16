@@ -17,6 +17,10 @@ from openwrench.ui import MainWindow
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments and arguments[0] == '--pdf-worker':
+        from openwrench.pdf_worker import main as worker_main
+        return worker_main(arguments[1:])
     parser = argparse.ArgumentParser(description='OpenWrench native desktop application')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--data-dir', type=Path, help='Use an isolated local workspace')

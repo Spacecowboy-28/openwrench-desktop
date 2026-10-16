@@ -1,58 +1,85 @@
 # Development status
 
-Session: 2026-10-14 (UTC). Version: 0.2.0.dev2.
-Branch: `dev/milestone-2`, based on merged main
-`76c15985a16330b156095a490c8c84da097d8a53`.
+Date: 2026-10-16. Version: 0.3.0.dev1. Branch: dev/milestone-3.
+Main baseline: `04c9b881c9f73d84e2d5af2b80c740be967bfbc7`.
+Milestones 1 and 2 merged through PR #1 and PR #3. The user reported successful
+Windows acceptance of Milestone 2, including its export/restore follow-up.
 
-## Completed scope
+## Implemented Milestone 3 scope
 
-Milestone 1 merged through PR #1. The existing PySide6 shell, SQLite database,
-test suite, build pipeline and Git history remain intact.
+- Native Repair Library linked to existing Garage UUIDs, categories, metadata,
+  multi-vehicle associations and configuration/applicability states.
+- Lawful local PDF import, duplicate/content validation, isolated cancellable
+  workers, offline FTS5 page search, native page/zoom/pan viewer and bookmarks.
+- LEMON/CHARM browser references with explicit uncertain coverage/access labels.
+  No scraping, automatic downloads or redistribution. Explicit NHTSA recall API
+  queries retain campaign identifiers; manufacturer communications use official
+  portal/dataset links, not a complete manual or TSB ingestion claim.
+- User-defined or user-verified manufacturer schedules, cited provenance,
+  conditions/specifications, linked service/procedure records, next-due values
+  and in-app reminders. No invented technical values or preloaded factory data.
+- Schema 4 with pre-migration snapshots and transactional rollback. SQLite holds
+  canonical PDF bytes and HTML bundle bytes for self-contained backup/restore. Viewing files recover
+  offline in a dedicated adjacent document directory. Restore validates schemas
+  1/2/3/4 and rebuilds FTS. Metadata exports omit document bytes and extracted content.
 
-Vehicle Garage now supports native add/edit/view/delete forms, optional starting
-profiles, manual offline entry, optional vPIC VIN decoding, dated mileage and
-service records, editable history, costs/currencies, notes and deletion
-confirmation. No user records are seeded. Tundra/Civic engine and trim stay blank.
+## Validation and commits
 
-Schema 1 → 2 creates a verified pre-upgrade backup and preserves settings. UUID
-records, foreign keys, unique VIN/name constraints and transactional chronology
-checks protect local records. Existing backups include Garage data and VIN cache.
-VIN lookup is asynchronous, bounded and cancellable. Cache entries expire after
-30 days. Returned data requires review before filling blank form fields.
+Baseline: 83 tests passed before changes. Current local suite: 143 passed.
+Source distribution, wheel and Linux native directory bundle built. Packaged
+startup plus actual packaged PDF import, FTS search and rendering passed.
+Native Repair Library and source-tab layouts were inspected with Qt offscreen.
+No physical Windows testing occurred in this session. Windows/Linux CI performs
+separate tests/builds/startup and packaged PDF worker checks on the review PR.
 
-Settings now exports versioned JSON and related CSV tables in a ZIP. Stable UUIDs,
-units, dates and integer costs/currency survive export. Validated SQLite restore
-supports schema 1/2, confirmation, a mandatory safety backup, transactional rollback
-and immediate Garage/theme refresh. The Garage heading uses singular for one vehicle.
-
-## Validation and delivery
-
-Local tests: 83 passed. Source distribution, wheel and Linux native bundle built.
-See `docs/MILESTONE_2.md` for evidence and manual review steps.
-Changes update existing PR #3 from dev/milestone-2 to main. The user
-must review and merge. No installer, release or automatic merge is authorized.
-GitHub CI is authoritative for the remote commit's Windows/Linux build status.
+Functional checkpoint commits:
+- aca7f67: schema, recovery, document/search and maintenance services.
+- d92649e: native UI, isolated workers, recall requests and packaging checks.
+- The review-completion commit adds regression cases and handoff documentation.
 
 ## Remaining limitations
 
-- JSON/CSV import is not implemented. Restore accepts only supported OpenWrench
-  SQLite schemas up to 256 MiB; CSV represents null and empty text identically.
-- Export/restore run synchronously; large workspaces could briefly pause the UI.
-- Service attachments, schedules and repair specifications belong to Milestone 3.
-- VIN validation checks format, not the checksum. vPIC reports decode issues.
-  Partial/invalid results never enable Apply. Older short identifiers need a
-  blank VIN and notes. Server availability and regional coverage vary.
-- The cache is independent of vehicle deletion and holds VIN responses locally.
-- Odometer rollover/replacement and unit conversion are not implemented. Units
-  lock after history exists. Same-day readings lack time ordering.
-- Costs use integer cents and a three-letter currency label, without conversion.
-- No hardware communication, public installer, signing or binary license audit.
-- Tests use synthetic VINs and controlled replies, not private owner records.
+LEMON's listed Lexus pages failed to load during research; CHARM access was
+intermittent. Catalog links are not confirmed procedure coverage. Tundra/Civic
+engine/trim/drivetrain remain unknown; Lexus drivetrain remains unconfirmed.
+Exact-string applicability is conservative and does not infer mechanical aliases.
+User verification labels record a declaration, not independent manufacturer review.
 
-## Exact next task
+No OCR, manual-site downloading/indexing, imported TSB corpus, verified factory
+schedule dataset, background OS notifications or diagnostics. PDF limits are
+50 MiB/file, 5,000 pages, 20 MiB extracted text and 16 million pixels/render.
+SQLite restore accepts files up to 1 GiB. Large Settings backup/restore operations
+still run synchronously. Cached viewing copies remain until explicit user cleanup.
+Schema-1/2 restores intentionally replace the Repair Library with empty records.
 
-Review PR #3 without automatic merge. The user confirmed Windows Python 3.12.10
-startup, persistence, live NHTSA decoding, mileage, service editing, integrity,
-backup, both themes and all 60 baseline tests at fb2258c. New export/restore
-controls still need Windows desktop acceptance using the checklist in
-`docs/MILESTONE_2.md`. After review and merge, begin Milestone 3.
+## Exact next step
+
+Review the Milestone 3 PR and run the Windows desktop acceptance steps in
+`docs/MILESTONE_3.md`. Keep Issue #2 open until acceptance completes. Do not merge
+automatically, publish installers/releases, or begin Milestone 4. Research and
+rights evidence lives in `docs/MILESTONE_3_SOURCES.md`; dependency notices live in
+THIRD_PARTY.md. The app preserves all original user records and Git history.
+
+## Offline HTML follow-up
+
+The user reports successful Windows Milestone 3 startup and Repair Library search.
+This extension adds generic lawful HTML/HTM/ZIP import, bounded archive validation,
+relative resources, sanitized native static viewing, navigation/zoom/bookmarks,
+vehicle-linked section search, broken-reference reports and self-contained restore.
+QTextBrowser was chosen over Qt WebEngine to avoid a script/network-capable
+browser engine. Only static HTML and a conservative CSS/SVG subset are supported.
+Script-generated navigation/content, modern layout, CSS imports/background images,
+OCR and completeness certification remain outside scope.
+
+No LEMON or other third-party manual content was imported into the repository.
+All new HTML/CSS/JS/SVG fixtures are original synthetic tests. The supplied entry
+page description is not evidence of complete procedures or this vehicle's fit.
+No unknown Tundra/Civic engine/trim or Lexus drivetrain values were inferred.
+
+Validation includes ZIP paths/symlinks/aliases/size limits, missing links/assets,
+blocked local/network resources, static SVG rendering, vehicle-filtered search,
+section navigation/bookmarks, cancellation, duplicate imports, schema-3 migration,
+transaction rollback, metadata-only JSON/CSV and portable HTML recovery. Existing
+PDF, Garage, Settings and migration regressions remain in the full suite.
+Windows/Linux CI also runs packaged HTML ZIP import/search/extraction/restore
+alongside the existing PDF import/render and packaged startup checks.

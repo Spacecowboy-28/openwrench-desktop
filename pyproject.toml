@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openwrench-desktop"
-version = "0.2.0.dev2"
+version = "0.3.0.dev1"
 description = "Offline automotive workshop desktop foundation"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "MIT"
-dependencies = ["PySide6-Essentials==6.8.3", "shiboken6==6.8.3"]
+dependencies = ["PySide6-Essentials==6.8.3", "shiboken6==6.8.3", "pypdfium2==5.14.0"]
 
 [project.gui-scripts]
 openwrench = "openwrench.app:main"

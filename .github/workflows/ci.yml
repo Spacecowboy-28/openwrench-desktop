@@ -39,6 +39,12 @@ jobs:
         run: |
           & ./dist/OpenWrench/OpenWrench.exe --smoke-test --data-dir "$env:RUNNER_TEMP/openwrench-smoke"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Linux packaged PDF / HTML acceptance
+        if: runner.os == 'Linux'
+        run: python scripts/check_packaged_library.py ./dist/OpenWrench/OpenWrench
+      - name: Windows packaged PDF / HTML acceptance
+        if: runner.os == 'Windows'
+        run: python scripts/check_packaged_library.py ./dist/OpenWrench/OpenWrench.exe
       # Binary distribution is gated on the milestone-6 license/source audit,
       # native installation tests, signing decision, and user release approval.
       - uses: actions/upload-artifact@v4

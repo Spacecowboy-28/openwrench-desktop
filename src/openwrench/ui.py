@@ -14,6 +14,7 @@ from openwrench import __version__
 from openwrench.garage_ui import GaragePage
 from openwrench.storage import SCHEMA_VERSION, Store
 from openwrench.transfers import export_garage
+from openwrench.library_ui import RepairLibraryPage
 
 
 def label(text: str, name: str = '') -> QLabel:
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(32)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName('Main navigation')
-        self.navigation.addItems(['My Garage', 'Settings'])
+        self.navigation.addItems(['My Garage', 'Settings', 'Repair Library'])
         side.addWidget(self.navigation)
         side.addWidget(label('LOCAL DATA\nNo account required', 'muted'))
         side.addWidget(label(f'Garage build {__version__}', 'muted'))
@@ -54,7 +55,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.pages, 1)
         self.pages.addWidget(self.garage_page())
         self.pages.addWidget(self.settings_page())
+        self.library_page = RepairLibraryPage(self.store, self)
+        self.pages.addWidget(self.library_page)
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(lambda index: self.library_page.refresh() if index == 2 else None)
         self.navigation.setCurrentRow(0)
         self.apply_theme(store.theme)
         self.statusBar().showMessage('Local database ready  |  No adapter connected')
@@ -70,7 +74,18 @@ class MainWindow(QMainWindow):
 
     def garage_page(self) -> QWidget:
         self.garage = GaragePage(self.store, self)
+        repair_button = QPushButton('Open Repair Library')
+        repair_button.clicked.connect(self.open_vehicle_library)
+        self.garage.layout().addWidget(repair_button)
         return self.garage
+
+    def open_vehicle_library(self):
+        self.navigation.setCurrentRow(2)
+        self.library_page.refresh(self.garage.current_id())
+
+    def closeEvent(self, event):
+        self.library_page.stop()
+        super().closeEvent(event)
 
     def settings_page(self) -> QWidget:
         page, layout = self.page('Settings', 'Control appearance and inspect your local workspace.')
@@ -85,7 +100,7 @@ class MainWindow(QMainWindow):
         path = label(str(self.store.path), 'muted')
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(path)
-        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups contain settings, vehicles, history, and cached VIN results.'))
+        layout.addWidget(label(f'SQLite schema {SCHEMA_VERSION}. Backups include Garage records, imported PDF bytes, Repair Library metadata and settings.'))
         self.backup_button = QPushButton('Save database backup…')
         self.backup_button.clicked.connect(self.choose_backup)
         self.restore_button = QPushButton('Restore database…')
@@ -129,12 +144,16 @@ class MainWindow(QMainWindow):
         self.result.setText(f'Garage export saved: {filename}')
 
     def choose_restore(self):
+        if self.library_page.busy:
+            QMessageBox.information(self, 'Document task active', 'Finish or cancel the document task before restoring.')
+            return
+        self.library_page.stop()
         filename, _ = QFileDialog.getOpenFileName(self, 'Choose an OpenWrench backup', '', 'SQLite database (*.sqlite3 *.db);;All files (*)')
         if not filename:
             return
         answer = QMessageBox.question(self, 'Replace this workspace?',
-            'Restore replaces all current vehicles, history, settings, and VIN cache with this backup. '
-            'A schema-1 backup contains settings only. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
+            'Restore replaces all current vehicles, history, documents, schedules, bookmarks, settings, and VIN cache with this backup. '
+            'Schema-1 backups contain settings only; schema-2 backups contain Garage records without a Repair Library. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -144,6 +163,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, 'Restore failed', str(error))
             return
         self.garage.refresh()
+        self.library_page.refresh()
         self.theme.blockSignals(True)
         self.theme.setCurrentText(self.store.theme)
         self.theme.blockSignals(False)

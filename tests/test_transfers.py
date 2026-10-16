@@ -62,7 +62,7 @@ def test_csv_relationships_quoting_and_formula_escaping(populated, tmp_path):
         assert services[0]['notes'] == 'Line 1\nLine 2'
         assert services[0]['cost_cents'] == '5499' and services[0]['currency'] == 'CAD'
         assert services[0]['distance_unit'] == 'km'
-        assert json.loads(archive.read('manifest.json'))['format_version'] == 1
+        assert json.loads(archive.read('manifest.json'))['format_version'] == 3
 
 
 def test_empty_exports_include_arrays_and_csv_headers(tmp_path):
@@ -131,7 +131,7 @@ def test_legacy_restore_migrates_copy_and_clears_garage(populated, tmp_path):
     safety = populated.restore(source)
     assert populated.theme == 'light'
     assert Garage(populated).vehicles() == []
-    assert populated.connection.execute('PRAGMA user_version').fetchone()[0] == 2
+    assert populated.connection.execute('PRAGMA user_version').fetchone()[0] == 4
     assert source.read_bytes() == original
     with closing(Store(safety)) as old:
         assert len(Garage(old).vehicles()) == 1
