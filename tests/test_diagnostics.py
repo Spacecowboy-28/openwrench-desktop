@@ -261,7 +261,7 @@ def test_schema4_to_5_migration_preserves_data_and_snapshots(tmp_path):
         create_library(db); create_html(db); db.commit()
     original = old.read_bytes()
     with closing(Store(old)) as migrated:
-        assert migrated.connection.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert migrated.connection.execute('PRAGMA user_version').fetchone()[0] == 6
         assert Garage(migrated).vehicles()[0]['engine'] == '4.6L V8'
         assert list(tmp_path.glob('v4.pre-v5-*.sqlite3'))
     assert original != old.read_bytes() or True  # a snapshot exists; front file upgraded
@@ -304,7 +304,7 @@ def test_backup_restore_and_export_include_diagnostics(workspace, tmp_path):
     service.finish(session)
 
     exported = garage_document(store)
-    assert exported['database_schema'] == 5
+    assert exported['database_schema'] == 6
     assert exported['diagnostics']['diagnostic_sessions'][0]['id'] == session
     assert exported['diagnostics']['diagnostic_codes']
     assert 'diagnostic_samples' not in exported['diagnostics']  # samples stay in the backup

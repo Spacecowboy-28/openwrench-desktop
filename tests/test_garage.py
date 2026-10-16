@@ -33,7 +33,7 @@ def test_upgrade_preserves_v1_settings_and_backup(tmp_path):
         db.commit()
     store = Store(path)
     assert store.theme == 'light'
-    assert store.connection.execute('PRAGMA user_version').fetchone()[0] == 5
+    assert store.connection.execute('PRAGMA user_version').fetchone()[0] == 6
     backups = list(tmp_path.glob('*.pre-v2-*.sqlite3'))
     assert len(backups) == 1
     with closing(sqlite3.connect(backups[0])) as db:

@@ -18,6 +18,11 @@ from PySide6.QtWidgets import (
 from openwrench.diagnostics import (
     DEFAULT_PIDS, PID_CATALOG, PRIMARY_PIDS, format_sample, pid_key, pid_meta,
 )
+from openwrench.diagnostic_guide import (
+    choose, current_node, evidence_from_session, start_run, suggested_options, transcript,
+)
+from openwrench.diagnostic_trees import TREES
+from openwrench.guide_service import GuideService
 from openwrench.diagnostics_session import DiagnosticService
 from openwrench.diagnostics_sim import SCENARIOS, SimulatorAdapter
 from openwrench.diagnostics_worker import SessionRunner
@@ -148,6 +153,36 @@ class DiagnosticsPage(QWidget):
             button = QPushButton(title); button.clicked.connect(callback); actions.addWidget(button)
         layout.addLayout(actions)
         self.detail = plain(''); layout.addWidget(self.detail)
+        self._build_guide(layout)
+
+    def _build_guide(self, layout):
+        """Milestone 5 guided decision trees. Authored reasoning aids, not procedures."""
+        heading = plain('Guided diagnosis'); heading.setObjectName('heading'); layout.addWidget(heading)
+        self.guide_banner = plain(
+            'Authored reasoning aid using this session\'s captured evidence. Not a manufacturer '
+            'procedure. Confirm every test value in official service information.')
+        self.guide_banner.setObjectName('banner'); layout.addWidget(self.guide_banner)
+        picker = QHBoxLayout()
+        self.guide_tree = QComboBox()
+        for tree in TREES.values():
+            self.guide_tree.addItem(f'{tree.title} (v{tree.version})', tree.id)
+        self.guide_tree.setAccessibleName('Decision tree')
+        picker.addWidget(self.guide_tree, 1)
+        self.guide_start = QPushButton('Start guide'); self.guide_start.clicked.connect(self.start_guide)
+        self.guide_save = QPushButton('Save run'); self.guide_save.setEnabled(False)
+        self.guide_save.clicked.connect(self.save_guide)
+        picker.addWidget(self.guide_start); picker.addWidget(self.guide_save)
+        layout.addLayout(picker)
+        self.guide_node = plain('Choose a session in Review, then start a guide.')
+        self.guide_node.setObjectName('heading'); layout.addWidget(self.guide_node)
+        self.guide_detail = plain(''); layout.addWidget(self.guide_detail)
+        self.guide_evidence = plain(''); self.guide_evidence.setObjectName('muted')
+        layout.addWidget(self.guide_evidence)
+        self.guide_options = QVBoxLayout(); layout.addLayout(self.guide_options)
+        self.guide_outcome = plain(''); layout.addWidget(self.guide_outcome)
+        self.guide_runs = QListWidget(); self.guide_runs.setMaximumHeight(90)
+        self.guide_runs.setAccessibleName('Saved guided runs'); layout.addWidget(self.guide_runs)
+        self.run = None
 
     # -- lifecycle ---------------------------------------------------------
     def refresh(self):
@@ -292,6 +327,61 @@ class DiagnosticsPage(QWidget):
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.service.delete(row['id']); self.codes.clear(); self.detail.setText(''); self.reload_sessions()
+
+    # -- guided decision trees (Milestone 5) -------------------------------
+    def start_guide(self):
+        if not self.last_session:
+            QMessageBox.information(self, 'No session', 'Review a diagnostic session first, then start a guide.')
+            return
+        try:
+            self.run = start_run(self.service, self.last_session, self.guide_tree.currentData())
+        except ValueError as error:
+            QMessageBox.information(self, 'Guided diagnosis', str(error)); return
+        self.guide_save.setEnabled(True)
+        self.show_node()
+
+    def show_node(self):
+        while self.guide_options.count():
+            item = self.guide_options.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        tree = TREES[self.run['tree_id']]
+        node = current_node(tree, self.run)
+        self.guide_node.setText(node.title)
+        self.guide_detail.setText(node.detail)
+        evidence = ', '.join(sorted(k for k, v in self.run['evidence'].items() if v)) or 'none'
+        self.guide_evidence.setText(f'Basis: {node.basis}\nEvidence from this session: {evidence}')
+        if node.kind == 'outcome':
+            self.guide_outcome.setText(
+                f'Outcome [{node.severity}]:\n' + '\n'.join(f'• {action}' for action in node.actions))
+            self.guide_save.setEnabled(True)
+            return
+        self.guide_outcome.setText('')
+        suggested = set(suggested_options(node, self.run['evidence']))
+        for option in node.options:
+            marker = '  (suggested by captured data)' if option.id in suggested else ''
+            button = QPushButton(f'{option.label}{marker}')
+            button.clicked.connect(lambda _=False, oid=option.id: self.choose_option(oid))
+            self.guide_options.addWidget(button)
+
+    def choose_option(self, option_id):
+        tree = TREES[self.run['tree_id']]
+        choose(tree, self.run, option_id)
+        self.show_node()
+
+    def save_guide(self):
+        if not self.run:
+            return
+        try:
+            GuideService(self.store).save(self.run)
+        except ValueError as error:
+            QMessageBox.critical(self, 'Guided diagnosis', str(error)); return
+        self.guide_node.setText('Run saved.')
+        self.guide_detail.setText(transcript(TREES[self.run['tree_id']], self.run))
+        self.guide_save.setEnabled(False)
+        self.guide_runs.clear()
+        for row in GuideService(self.store).runs(self.run['session_id']):
+            self.guide_runs.addItem(f'{row["tree_id"]} v{row["tree_version"]} · {row["outcome"] or "(in progress)"}')
 
     def stop(self):
         if self.runner.active:

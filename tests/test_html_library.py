@@ -84,7 +84,7 @@ def test_html_import_search_vehicle_export_restore(library,tmp_path):
     root=lib.local_path(identifier)
     assert (root/'assets/diagram.svg').read_bytes()==lib.html_files(identifier)['assets/diagram.svg']
     exported=garage_document(lib.store)
-    assert exported['database_schema']==5 and exported['format_version']==3
+    assert exported['database_schema']==6 and exported['format_version']==3
     assert exported['repair_library']['html_sections'][result['page']-1]['path']==section['path']
     assert 'fictional clearance' not in json.dumps(exported) and '<svg' not in json.dumps(exported)
     csv=export_garage(lib.store,tmp_path/'export.zip','csv')
@@ -176,7 +176,7 @@ def test_schema3_migration_and_restore_pdf_preservation(tmp_path):
         lib=Library(store);identifier=lib.import_document(synthetic_pdf(tmp_path/'original.pdf'),details(),[])
         assert lib.document(identifier)['format']=='pdf' and lib.search('brake')[0]['id']==identifier
     with closing(Store(old)) as migrated:
-        assert migrated.connection.execute('PRAGMA user_version').fetchone()[0]==5
+        assert migrated.connection.execute('PRAGMA user_version').fetchone()[0]==6
         assert list(tmp_path.glob('v3.pre-v4-*.sqlite3'))
 
 

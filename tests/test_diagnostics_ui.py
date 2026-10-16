@@ -93,3 +93,36 @@ def test_closing_window_stops_active_session(app, tmp_path):
     window.close()
     assert not page.runner.active
     store.close()
+
+
+def test_guided_tree_walk_and_save_in_ui(app, tmp_path):
+    store, vehicle, window = _window(tmp_path)
+    window.navigation.setCurrentRow(1)
+    page = window.diagnostics_page
+    # Deterministic misfire session so the guide has codes and rpm evidence.
+    from openwrench.diagnostics_session import DiagnosticService
+    from openwrench.diagnostics_sim import SimulatorAdapter
+    service = DiagnosticService(store)
+    session = service.start(vehicle, 'simulator', 'misfire')
+    sim = SimulatorAdapter('misfire'); sim.connect()
+    sequence = 1
+    for index in range(4):
+        sequence = service.append(session, [sim.read_pid(0x0C), sim.read_pid(0x42)], sequence, index * 100)
+    service.add_codes(session, sim.codes(), '03')
+    service.finish(session)
+    page.refresh()
+    assert page.sessions.count() >= 1
+    page.sessions.setCurrentRow(0)
+    page.review()
+    assert 'SIMULATED' in page.banner.text()
+    page.start_guide()
+    assert 'codes' in page.guide_node.text().lower() or page.guide_node.text()
+    # Walk to an outcome using the first available option buttons.
+    while page.guide_options.count():
+        page.guide_options.itemAt(0).widget().click()
+    assert 'Outcome' in page.guide_outcome.text()
+    page.save_guide()
+    assert 'Run saved.' in page.guide_node.text()
+    assert page.guide_runs.count() == 1
+    window.close(); store.close()
+
