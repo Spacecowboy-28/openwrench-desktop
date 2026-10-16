@@ -8,6 +8,7 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
 from test_library import synthetic_pdf,details
+from test_html_library import synthetic_html
 from openwrench.storage import Store
 from openwrench.library import Library
 
@@ -32,7 +33,16 @@ def main():
         store=Store(database)
         assert Library(store).search('brake')[0]['id']==identifier
         store.close()
-        print('Packaged PDF import, FTS search and page rendering passed.')
+        html=worker(dict(operation='import',source=str(synthetic_html(directory/'original.zip')),metadata=details(),vehicles=[]))
+        bundle=Path(worker(dict(operation='materialize',id=html)))
+        assert (bundle/'procedures'/'brake.htm').is_file()
+        store=Store(database)
+        assert Library(store).search('caliper')[0]['id']==html
+        backup=store.backup(directory/'backup.sqlite3');store.close()
+        restored=Store(directory/'restored.sqlite3');restored.restore(backup)
+        assert Library(restored).local_path(html).is_dir()
+        restored.close()
+        print('Packaged PDF render and HTML ZIP import, search, extraction and portable restore passed.')
 
 
 if __name__=='__main__':main()

@@ -246,7 +246,7 @@ class RepairLibraryPage(QWidget):
         local_layout.addWidget(self.documents,1)
         self.detail=plain('Import a lawful PDF to begin. No repair specifications are preloaded.');local_layout.addWidget(self.detail)
         actions=QGridLayout();self.document_buttons=[]
-        for index,(title,callback) in enumerate([('Import PDF',self.import_pdf),('Open PDF',self.open_document),('Edit details / vehicles',self.edit_document),
+        for index,(title,callback) in enumerate([('Import PDF / HTML / ZIP',self.import_pdf),('Open document',self.open_document),('Edit details / vehicles',self.edit_document),
             ('Rebuild index',self.reindex),('Locate original',self.locate),('Remove document',self.delete_document)]):
             button=QPushButton(title);button.clicked.connect(callback);actions.addWidget(button,index//3,index%3);self.document_buttons.append(button)
         local_layout.addLayout(actions)
@@ -334,7 +334,11 @@ class RepairLibraryPage(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole,(row['id'],1));self.documents.addItem(item)
             if query:
                 for row in self.library.search(query,vehicle,category):
-                    item=QListWidgetItem(f"{row['title']} · page {row['page']}\n{row['excerpt']}")
+                    label='section' if row['format']=='html' else 'page'
+                    location=''
+                    if row['format']=='html':
+                        location=f" · {row['path']}#{row['anchor']}"
+                    item=QListWidgetItem(f"{row['title']} · {label} {row['page']}{location}\n{row['excerpt']}")
                     item.setData(Qt.ItemDataRole.UserRole,(row['id'],row['page']));self.documents.addItem(item)
         except (ValueError,sqlite3.Error) as exc:error(self,exc)
         if self.documents.count():self.documents.setCurrentRow(0)
@@ -355,7 +359,7 @@ class RepairLibraryPage(QWidget):
         if self.busy:return
         self.task=DocumentTask(self.store,operation,parameters,self)
         self.local.setEnabled(False);self.cancel.show();self.progress.show();self.progress.setRange(0,0)
-        self.status.setText('Processing PDF in a separate process…')
+        self.status.setText('Processing document in a separate process…')
         self.task.progress.connect(lambda n,total:(self.progress.setRange(0,total),self.progress.setValue(n)))
         def complete(result,message):
             self.local.setEnabled(True);self.cancel.hide();self.progress.hide()
@@ -363,7 +367,7 @@ class RepairLibraryPage(QWidget):
         self.task.finished.connect(complete);self.task.start()
 
     def import_pdf(self):
-        source,_=QFileDialog.getOpenFileName(self,'Import a lawful PDF','','PDF (*.pdf);;All files (*)')
+        source,_=QFileDialog.getOpenFileName(self,'Import a lawful document','','Supported documents (*.pdf *.html *.htm *.zip);;All files (*)')
         if not source:return
         dialog=DocumentDialog(self.library,self.vehicle.currentData(),parent=self)
         dialog.fields['title'].setText(Path(source).stem)
@@ -384,7 +388,11 @@ class RepairLibraryPage(QWidget):
         if selected:self.show_pdf(*selected)
 
     def show_pdf(self,identifier,page=1):
-        viewer=PdfViewer(self.library,identifier,page,self)
+        if self.library.document(identifier)['format']=='html':
+            from openwrench.html_ui import HtmlViewer
+            viewer=HtmlViewer(self.library,identifier,page,self)
+        else:
+            viewer=PdfViewer(self.library,identifier,page,self)
         self.viewers.append(viewer)
         viewer.finished.connect(lambda _:self.reload_bookmarks())
         viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -398,6 +406,8 @@ class RepairLibraryPage(QWidget):
     def locate(self):
         selected=self.selected_document()
         if not selected:return
+        if self.library.document(selected[0])['format']=='html':
+            error(self,'Restore a complete SQLite backup to recover an HTML bundle.');return
         source,_=QFileDialog.getOpenFileName(self,'Locate the exact original PDF','','PDF (*.pdf);;All files (*)')
         if source:self.run_task('locate',dict(id=selected[0],source=source))
 

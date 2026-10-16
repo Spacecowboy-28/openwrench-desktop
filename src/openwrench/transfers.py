@@ -140,7 +140,7 @@ def garage_document(store):
     units = {v['id']: v['unit'] for v in data['vehicles']}
     vehicles = [{k: v[k] for k in VEHICLE_FIELDS} for v in sorted(data['vehicles'], key=lambda v: v['id'])]
     records = [dict(row, distance_unit=units[row['vehicle_id']]) for row in sorted(data['entries'], key=lambda r: (r['vehicle_id'], r['date'], r['id']))]
-    return dict(format='openwrench-garage', format_version=2, database_schema=3,
+    return dict(format='openwrench-garage', format_version=3, database_schema=4,
                 exported_at=datetime.now(timezone.utc).isoformat(), vehicles=vehicles,
                 repair_library={table:data[table] for table in METADATA_TABLES},
                 odometer_readings=[r for r in records if r['kind'] == 'mileage'],
@@ -219,16 +219,19 @@ def validated_backup(source, directory):
         incoming.execute('PRAGMA trusted_schema=OFF')
         incoming.execute('BEGIN')  # Validate and copy the same consistent snapshot.
         version = incoming.execute('PRAGMA user_version').fetchone()[0]
-        if version not in (1, 2, 3):
-            raise ValueError('Only OpenWrench schema 1, 2 or 3 backups are supported. Newer versions need a newer app.')
+        if version not in (1, 2, 3, 4):
+            raise ValueError('Only OpenWrench schema 1, 2, 3 or 4 backups are supported. Newer versions need a newer app.')
         if incoming.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
             raise ValueError('Backup failed SQLite integrity validation.')
         with closing(sqlite3.connect(':memory:')) as expected_v1, closing(Store(directory / 'reference.sqlite3')) as reference:
             expected_v1.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-            if version == 2:
+            if version in (2,3):
                 from types import SimpleNamespace
                 Store._migrate_garage(SimpleNamespace(connection=expected_v1))
-            expected = expected_v1 if version in (1,2) else reference.connection
+            if version == 3:
+                from openwrench.library_schema import create_library
+                create_library(expected_v1)
+            expected = expected_v1 if version in (1,2,3) else reference.connection
             if schema_signature(incoming) != schema_signature(expected):
                 raise ValueError('This file does not match the supported OpenWrench schema.')
         if incoming.execute('PRAGMA foreign_key_check').fetchone():

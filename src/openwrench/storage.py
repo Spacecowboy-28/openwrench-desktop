@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from uuid import uuid4
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Store:
@@ -41,6 +41,13 @@ class Store:
                 if version > 0:
                     self.backup(self.path.with_name(f'{self.path.stem}.pre-v3-{uuid4().hex}.sqlite3'))
                 self._migrate_library()
+            if version < 4:
+                if version > 0:
+                    self.backup(self.path.with_name(f'{self.path.stem}.pre-v4-{uuid4().hex}.sqlite3'))
+                from openwrench.library_schema import create_html
+                with self.connection:
+                    self.connection.execute('BEGIN IMMEDIATE')
+                    create_html(self.connection)
             self.connection.row_factory = sqlite3.Row
         except Exception:
             self.connection.close()

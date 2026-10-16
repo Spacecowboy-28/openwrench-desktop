@@ -1,7 +1,7 @@
 """Schema 3. Content bytes make SQLite snapshots self-contained and recoverable."""
 LIBRARY_TABLES = ('vehicle_configuration', 'documents', 'document_files', 'document_vehicles',
-                  'document_pages', 'bookmarks', 'schedules')
-METADATA_TABLES = ('vehicle_configuration', 'documents', 'document_vehicles', 'bookmarks', 'schedules')
+                  'document_pages', 'bookmarks', 'schedules', 'html_sections')
+METADATA_TABLES = ('vehicle_configuration', 'documents', 'document_vehicles', 'bookmarks', 'schedules', 'html_sections')
 CATEGORIES = ('Engine', 'Transmission and drivetrain', 'Electrical systems', 'Brakes',
               'Steering and suspension', 'Cooling', 'Fuel and emissions', 'HVAC',
               'Body and interior', 'Maintenance', 'Diagnostic trouble codes',
@@ -58,3 +58,9 @@ def create_library(db):
 def rebuild_fts(db):
     db.execute('DELETE FROM library_fts')
     db.execute('INSERT INTO library_fts SELECT document_id,page,text FROM document_pages')
+
+
+def create_html(db):
+    db.execute("ALTER TABLE documents ADD COLUMN format TEXT NOT NULL DEFAULT 'pdf'")
+    db.execute("CREATE TABLE html_sections (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, page INTEGER NOT NULL CHECK(page>0), path TEXT NOT NULL, anchor TEXT NOT NULL, PRIMARY KEY(document_id,page))")
+    db.execute('PRAGMA user_version=4')

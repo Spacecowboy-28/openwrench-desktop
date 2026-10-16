@@ -102,6 +102,8 @@ class Library:
             self.db.executemany('INSERT INTO document_vehicles VALUES (?,?)', [(identifier, v) for v in set(vehicles)])
 
     def import_document(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False):
+        if Path(source).suffix.lower() in ('.html','.htm','.zip'):
+            return self.import_html(source, data, vehicles, progress, cancelled)
         from openwrench.pdf_engine import extract
         values = metadata(data)
         for vehicle in vehicles:
@@ -133,6 +135,79 @@ class Library:
             self._pages(identifier, pages)
         return identifier
 
+    def import_html(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False):
+        from openwrench.html_bundle import import_source, pack, index
+        values = metadata(data)
+        for vehicle in vehicles: Garage(self.store).vehicle(vehicle)
+        files = import_source(source, cancelled)
+        progress(1,3)
+        content, sections = pack(files), index(files)
+        digest = hashlib.sha256(content).hexdigest()
+        if self.db.execute('SELECT 1 FROM documents WHERE sha256=?',(digest,)).fetchone():
+            raise ValueError('This HTML bundle already exists. Edit its associations instead.')
+        if cancelled(): raise InterruptedError('Import cancelled.')
+        identifier = str(uuid4())
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            columns = ('id','sha256',*values,'page_count','index_status','created_at','format')
+            args = (identifier,digest,*values.values(),len(sections),'Searchable',datetime.now(timezone.utc).isoformat(),'html')
+            self.db.execute('INSERT INTO documents ('+','.join(columns)+') VALUES ('+','.join('?' for _ in columns)+')',args)
+            self.db.execute('INSERT INTO document_files VALUES (?,?)',(identifier,content))
+            self.db.executemany('INSERT INTO document_vehicles VALUES (?,?)',[(identifier,v) for v in set(vehicles)])
+            self._html_index(identifier,sections)
+        progress(3,3)
+        return identifier
+
+    def _html_index(self, identifier, sections):
+        self._pages(identifier,[s['text'] for s in sections])
+        self.db.execute('DELETE FROM html_sections WHERE document_id=?',(identifier,))
+        self.db.executemany('INSERT INTO html_sections VALUES (?,?,?,?)',
+            [(identifier,n,s['path'],s['anchor']) for n,s in enumerate(sections,1)])
+        self.db.execute('UPDATE documents SET page_count=?,index_status=? WHERE id=?',(len(sections),'Searchable',identifier))
+
+    def html_files(self, identifier):
+        from openwrench.html_bundle import read_zip
+        doc = self.document(identifier)
+        row = self.db.execute('SELECT content FROM document_files WHERE document_id=?',(identifier,)).fetchone()
+        if doc['format'] != 'html' or not row or hashlib.sha256(row[0]).hexdigest() != doc['sha256']:
+            raise ValueError('Missing or damaged HTML bundle.')
+        return read_zip(row[0])
+
+    def html_sections(self, identifier):
+        return [dict(r) for r in self.db.execute('SELECT * FROM html_sections WHERE document_id=? ORDER BY page',(identifier,))]
+
+    def materialize_html(self, identifier):
+        # Original bytes remain in SQLite. Extract only validated entries, into a
+        # fresh staging directory, then rename. Never follow preexisting files.
+        import shutil
+        files = self.html_files(identifier)
+        root = self.directory
+        if root.is_symlink(): raise ValueError('Document directory is a symbolic link.')
+        root.mkdir(parents=True,exist_ok=True)
+        destination = root / (self.document(identifier)['sha256']+'.html-bundle')
+        if destination.is_symlink(): raise ValueError('Bundle directory is a symbolic link.')
+        if destination.exists():
+            actual = set()
+            for path in destination.rglob('*'):
+                if path.is_symlink(): raise ValueError('Cached bundle contains a symbolic link.')
+                if path.is_file():
+                    name = path.relative_to(destination).as_posix()
+                    if name not in files or path.stat().st_size != len(files[name]) or path.read_bytes() != files[name]:
+                        raise ValueError('Cached bundle changed. Move it aside to recover stored content.')
+                    actual.add(name)
+            if actual != set(files): raise ValueError('Cached bundle is incomplete. Move it aside to recover stored content.')
+            return destination
+        staging = Path(tempfile.mkdtemp(prefix='.html-',dir=root))
+        try:
+            for name,content in files.items():
+                path = staging / name
+                path.parent.mkdir(parents=True,exist_ok=True)
+                with path.open('xb') as output: output.write(content)
+            staging.rename(destination)
+        finally:
+            if staging.exists(): shutil.rmtree(staging)
+        return destination
+
     def _pages(self, identifier, pages):
         self.db.execute('DELETE FROM library_fts WHERE document_id=?', (identifier,))
         self.db.execute('DELETE FROM document_pages WHERE document_id=?', (identifier,))
@@ -142,7 +217,14 @@ class Library:
 
     def reindex(self, identifier, progress=lambda *a: None, cancelled=lambda: False):
         from openwrench.pdf_engine import extract
-        self.document(identifier)
+        if self.document(identifier)['format'] == 'html':
+            files = self.html_files(identifier)
+            from openwrench.html_bundle import index
+            sections = index(files)
+            if cancelled(): raise InterruptedError('Indexing cancelled.')
+            with self.db:
+                self._html_index(identifier, sections)
+            return
         row = self.db.execute('SELECT content FROM document_files WHERE document_id=?', (identifier,)).fetchone()
         if not row:
             raise ValueError('Document bytes are missing. Restore a complete backup.')
@@ -156,6 +238,8 @@ class Library:
 
     def local_path(self, identifier):
         document = self.document(identifier)
+        if document['format'] == 'html':
+            return self.materialize_html(identifier)
         digest = document['sha256']
         if not re.fullmatch('[0-9a-f]{64}', digest):
             raise ValueError('Invalid document identity.')
@@ -196,7 +280,7 @@ class Library:
     def delete(self, identifier):
         doc = self.document(identifier)
         # Keep any materialized file in a recoverable local folder, never touch source.
-        path = self.directory / (doc['sha256']+'.pdf')
+        path = self.directory / (doc['sha256']+('.html-bundle' if doc['format']=='html' else '.pdf'))
         with self.db:
             self.db.execute('DELETE FROM library_fts WHERE document_id=?', (identifier,))
             self.db.execute('DELETE FROM documents WHERE id=?', (identifier,))
@@ -208,9 +292,11 @@ class Library:
         if not tokens:
             return []
         expression = ' AND '.join('"'+t+'"' for t in tokens)
-        sql = '''SELECT d.id,d.title,d.category,CAST(f.page AS INTEGER) AS page,
+        sql = '''SELECT d.id,d.title,d.category,d.source,d.publisher,d.format,h.path,h.anchor,CAST(f.page AS INTEGER) AS page,
                  snippet(library_fts,2,'[',']',' … ',24) AS excerpt
-                 FROM library_fts f JOIN documents d ON d.id=f.document_id WHERE library_fts MATCH ?'''
+                 FROM library_fts f JOIN documents d ON d.id=f.document_id
+                 LEFT JOIN html_sections h ON h.document_id=d.id AND h.page=CAST(f.page AS INTEGER)
+                 WHERE library_fts MATCH ?'''
         args = [expression]
         if vehicle_id:
             sql += ' AND EXISTS(SELECT 1 FROM document_vehicles v WHERE v.document_id=d.id AND v.vehicle_id=?)'
@@ -249,6 +335,7 @@ def validate_library_records(data, include_content=True):
         integer(doc['page_count'],'Page count',1,MAX_PAGES)
         if not re.fullmatch('[0-9a-f]{64}',doc['sha256']):
             raise ValueError('Invalid PDF hash.')
+        if doc['format'] not in ('pdf','html'): raise ValueError('Unsupported document format.')
         if doc['index_status'] not in ('Searchable','No extractable text; OCR unavailable'):
             raise ValueError('Invalid indexing status.')
         documents[doc['id']] = doc
@@ -256,11 +343,25 @@ def validate_library_records(data, include_content=True):
     for row in data.get('document_files',[]):
         doc = documents.get(row['document_id'])
         value = row['content']
-        if not doc or not isinstance(value,bytes) or len(value)>MAX_PDF_BYTES or not value.startswith(b'%PDF-') or hashlib.sha256(value).hexdigest()!=doc['sha256']:
+        if not doc or not isinstance(value,bytes) or len(value)>MAX_PDF_BYTES or (doc['format']=='pdf' and not value.startswith(b'%PDF-')) or hashlib.sha256(value).hexdigest()!=doc['sha256']:
             raise ValueError('Missing or damaged document content.')
+        if doc['format']=='html':
+            from openwrench.html_bundle import read_zip, index
+            sections = index(read_zip(value))
+            actual = [dict(path=r['path'],anchor=r['anchor'],page=r['page']) for r in data['html_sections'] if r['document_id']==doc['id']]
+            expected = [dict(path=r['path'],anchor=r['anchor'],page=n) for n,r in enumerate(sections,1)]
+            if sorted(actual,key=lambda r:r['page']) != expected or len(sections)!=doc['page_count']:
+                raise ValueError('HTML section metadata does not match bundle.')
         files.add(doc['id'])
     if include_content and files != set(documents):
         raise ValueError('Backup lacks document content.')
+    for row in data.get('html_sections',[]):
+        from openwrench.html_bundle import safe_path
+        doc = documents.get(row['document_id'])
+        if not doc or doc['format']!='html': raise ValueError('Orphan HTML section.')
+        safe_path(row['path'])
+        integer(row['page'],'Section',1,doc['page_count'])
+        text(row['anchor'],'Anchor',500)
     sizes = {}
     for row in data.get('document_pages',[]):
         doc = documents.get(row['document_id'])
