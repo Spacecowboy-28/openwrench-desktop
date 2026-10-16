@@ -49,9 +49,16 @@ def decode_dtc(byte_high, byte_low):
     return f'{prefix}{number:04X}'
 
 
-def parse_dtcs(text):
-    """Parse mode 03/07/0A data bytes into codes. Tolerates ELM noise lines."""
-    clean = re.sub(r'[^0-9A-Fa-f]', '', _strip_echo(text))
+def parse_dtcs(text, mode='03'):
+    """Parse mode 03/07/0A data bytes into codes. Tolerates ELM noise lines.
+
+    The first returned byte is the mode with bit 6 set (e.g. 0x43 for mode 03),
+    so it is stripped before pairing the remaining bytes.
+    """
+    clean = re.sub(r'[^0-9A-Fa-f]', '', _strip_echo(text)).upper()
+    response = f'{int(str(mode).upper().zfill(2), 16) + 0x40:02X}'
+    if clean.startswith(response):
+        clean = clean[len(response):]
     if len(clean) < 4:
         return ()
     codes = []
@@ -64,15 +71,20 @@ def parse_dtcs(text):
 
 
 def _strip_echo(text):
-    """Remove ELM prompt/echo and status lines such as SEARCHING... or NO DATA."""
+    """Remove ELM prompt/echo and status lines, joining multi-frame data lines.
+
+    An ELM327 splits long responses across lines (and may echo the request), so
+    every data line is concatenated rather than only the first.
+    """
+    parts = []
     for line in re.split(r'[\r\n]+', text):
         value = line.strip()
-        if not value or value.endswith('>') and value == '>':
+        if not value or value == '>':
             continue
         if _is_status_line(value):
             continue
-        return value
-    return ''
+        parts.append(value)
+    return ''.join(parts)
 
 
 def _is_status_line(value):
@@ -192,7 +204,7 @@ class ElmAdapter:
         mode = str(mode).upper().zfill(2)
         if mode not in DTC_MODES:
             raise UnsupportedRequest('Only read-only DTC modes 03/07/0A are enabled.')
-        return parse_dtcs(self._request(mode))
+        return parse_dtcs(self._request(mode), mode)
 
     def codes(self):
         found = []
