@@ -131,7 +131,7 @@ def test_legacy_restore_migrates_copy_and_clears_garage(populated, tmp_path):
     safety = populated.restore(source)
     assert populated.theme == 'light'
     assert Garage(populated).vehicles() == []
-    assert populated.connection.execute('PRAGMA user_version').fetchone()[0] == 4
+    assert populated.connection.execute('PRAGMA user_version').fetchone()[0] == 5
     assert source.read_bytes() == original
     with closing(Store(safety)) as old:
         assert len(Garage(old).vehicles()) == 1

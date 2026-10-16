@@ -16,7 +16,7 @@ def test_first_launch_migrates_and_reopen_preserves_theme(tmp_path):
     reopened = Store(path)
     assert reopened.theme == 'light'
     assert reopened.integrity() == 'ok'
-    assert reopened.connection.execute('PRAGMA user_version').fetchone()[0] == 4
+    assert reopened.connection.execute("PRAGMA user_version").fetchone()[0] == 5
     reopened.close()
 
 

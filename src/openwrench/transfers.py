@@ -16,8 +16,10 @@ import zipfile
 from openwrench.garage import integer, normalize_vin, text, validated_date
 
 from openwrench.library_schema import LIBRARY_TABLES, METADATA_TABLES
+from openwrench.diagnostics_schema import DIAGNOSTIC_TABLES
 
-TABLES = ('settings', 'vehicles', 'entries', 'vin_cache', *LIBRARY_TABLES)
+TABLES = ('settings', 'vehicles', 'entries', 'vin_cache', *LIBRARY_TABLES, *DIAGNOSTIC_TABLES)
+DIAGNOSTIC_METADATA = ('diagnostic_sessions', 'diagnostic_codes')
 VEHICLE_FIELDS = ('id', 'nickname', 'vin', 'year', 'make', 'model', 'engine', 'trim', 'notes', 'unit', 'created_at')
 RECORD_FIELDS = ('id', 'vehicle_id', 'kind', 'date', 'odometer', 'distance_unit', 'title', 'notes', 'cost_cents', 'currency')
 
@@ -124,7 +126,9 @@ def validate_records(data, include_content=True):
             if not isinstance(payload, dict) or not isinstance(payload.get('Results'), list):
                 raise ValueError('Invalid cache payload.')
         from openwrench.library import validate_library_records
+        from openwrench.diagnostics_session import validate_diagnostic_records
         validate_library_records(data, include_content)
+        validate_diagnostic_records(data)
     except (KeyError, TypeError, AttributeError, OverflowError) as error:
         raise ValueError('Database contains malformed Garage data.') from error
 
@@ -135,14 +139,18 @@ def garage_document(store):
         raise ValueError('Finish the current database operation before exporting.')
     with db:
         db.execute('BEGIN')
-        data = read_tables(db, ('settings','vehicles','entries','vin_cache',*METADATA_TABLES))
+        data = read_tables(db, ('settings','vehicles','entries','vin_cache',
+                                *METADATA_TABLES, *DIAGNOSTIC_TABLES))
     validate_records(data, include_content=False)
     units = {v['id']: v['unit'] for v in data['vehicles']}
     vehicles = [{k: v[k] for k in VEHICLE_FIELDS} for v in sorted(data['vehicles'], key=lambda v: v['id'])]
     records = [dict(row, distance_unit=units[row['vehicle_id']]) for row in sorted(data['entries'], key=lambda r: (r['vehicle_id'], r['date'], r['id']))]
-    return dict(format='openwrench-garage', format_version=3, database_schema=4,
+    return dict(format='openwrench-garage', format_version=3, database_schema=5,
                 exported_at=datetime.now(timezone.utc).isoformat(), vehicles=vehicles,
                 repair_library={table:data[table] for table in METADATA_TABLES},
+                # Session summaries and codes are user-owned metadata. Raw samples are
+                # measurements kept only in the self-contained SQLite backup.
+                diagnostics={table:data[table] for table in DIAGNOSTIC_METADATA},
                 odometer_readings=[r for r in records if r['kind'] == 'mileage'],
                 service_history=[r for r in records if r['kind'] == 'service'])
 
@@ -193,6 +201,9 @@ def export_garage(store, destination, kind):
             for table in METADATA_TABLES:
                 columns = [row[1] for row in store.connection.execute(f'PRAGMA table_info({table})')]
                 archive.writestr(table+'.csv', csv_bytes(document['repair_library'][table], columns))
+            for table in DIAGNOSTIC_METADATA:
+                columns = [row[1] for row in store.connection.execute(f'PRAGMA table_info({table})')]
+                archive.writestr(table+'.csv', csv_bytes(document['diagnostics'][table], columns))
             archive.writestr('manifest.json', json.dumps({k: document[k] for k in ('format', 'format_version', 'database_schema', 'exported_at')}, indent=2))
             archive.writestr('README.txt', 'OpenWrench Garage CSV export, format 2.\n'
                 'Join record.vehicle_id to vehicles.id. Record id values remain stable.\n'
@@ -219,19 +230,22 @@ def validated_backup(source, directory):
         incoming.execute('PRAGMA trusted_schema=OFF')
         incoming.execute('BEGIN')  # Validate and copy the same consistent snapshot.
         version = incoming.execute('PRAGMA user_version').fetchone()[0]
-        if version not in (1, 2, 3, 4):
-            raise ValueError('Only OpenWrench schema 1, 2, 3 or 4 backups are supported. Newer versions need a newer app.')
+        if version not in (1, 2, 3, 4, 5):
+            raise ValueError('Only OpenWrench schema 1, 2, 3, 4 or 5 backups are supported. Newer versions need a newer app.')
         if incoming.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
             raise ValueError('Backup failed SQLite integrity validation.')
         with closing(sqlite3.connect(':memory:')) as expected_v1, closing(Store(directory / 'reference.sqlite3')) as reference:
             expected_v1.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-            if version in (2,3):
+            if version in (2, 3, 4, 5):
                 from types import SimpleNamespace
                 Store._migrate_garage(SimpleNamespace(connection=expected_v1))
-            if version == 3:
+            if version in (3, 4, 5):
                 from openwrench.library_schema import create_library
                 create_library(expected_v1)
-            expected = expected_v1 if version in (1,2,3) else reference.connection
+            if version == 4:
+                from openwrench.library_schema import create_html
+                create_html(expected_v1)
+            expected = expected_v1 if version in (1, 2, 3, 4) else reference.connection
             if schema_signature(incoming) != schema_signature(expected):
                 raise ValueError('This file does not match the supported OpenWrench schema.')
         if incoming.execute('PRAGMA foreign_key_check').fetchone():

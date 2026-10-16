@@ -12,9 +12,9 @@ def test_window_navigation_theme_and_restart(app, tmp_path):
     window.show()
     app.processEvents()
     assert window.isVisible()
-    assert window.pages.count() == 3
-    window.navigation.setCurrentRow(1)
-    assert window.pages.currentIndex() == 1
+    assert window.pages.count() == 4
+    window.navigation.setCurrentRow(3)
+    assert window.pages.currentIndex() == 3
     window.theme.setCurrentText('light')
     QTest.mouseClick(window.check_button, Qt.MouseButton.LeftButton)
     assert window.result.text() == 'Database check passed.'
@@ -31,7 +31,7 @@ def test_backup_button_creates_openable_database(app, tmp_path, monkeypatch):
     store = Store(tmp_path / 'app.sqlite3')
     window = MainWindow(store)
     window.show()
-    window.navigation.setCurrentRow(1)
+    window.navigation.setCurrentRow(3)
     target = tmp_path / 'backup.sqlite3'
     monkeypatch.setattr('openwrench.ui.QFileDialog.getSaveFileName', lambda *a: (str(target), ''))
     QTest.mouseClick(window.backup_button, Qt.MouseButton.LeftButton)

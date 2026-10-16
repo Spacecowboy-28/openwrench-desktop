@@ -5,13 +5,14 @@ import sqlite3
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
     QVBoxLayout, QWidget, QScrollArea,
 )
 
 from openwrench import __version__
 from openwrench.garage_ui import GaragePage
+from openwrench.diagnostics_ui import DiagnosticsPage
 from openwrench.storage import SCHEMA_VERSION, Store
 from openwrench.transfers import export_garage
 from openwrench.library_ui import RepairLibraryPage
@@ -46,7 +47,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(32)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName('Main navigation')
-        self.navigation.addItems(['My Garage', 'Settings', 'Repair Library'])
+        self.navigation.addItems(['My Garage', 'Diagnostics', 'Repair Library', 'Settings'])
         side.addWidget(self.navigation)
         side.addWidget(label('LOCAL DATA\nNo account required', 'muted'))
         side.addWidget(label(f'Garage build {__version__}', 'muted'))
@@ -54,10 +55,13 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         layout.addWidget(self.pages, 1)
         self.pages.addWidget(self.garage_page())
-        self.pages.addWidget(self.settings_page())
+        self.diagnostics_page = DiagnosticsPage(self.store, self)
+        self.pages.addWidget(self.diagnostics_page)
         self.library_page = RepairLibraryPage(self.store, self)
         self.pages.addWidget(self.library_page)
+        self.pages.addWidget(self.settings_page())
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(lambda index: self.diagnostics_page.refresh() if index == 1 else None)
         self.navigation.currentRowChanged.connect(lambda index: self.library_page.refresh() if index == 2 else None)
         self.navigation.setCurrentRow(0)
         self.apply_theme(store.theme)
@@ -84,6 +88,7 @@ class MainWindow(QMainWindow):
         self.library_page.refresh(self.garage.current_id())
 
     def closeEvent(self, event):
+        self.diagnostics_page.stop()
         self.library_page.stop()
         super().closeEvent(event)
 
@@ -96,6 +101,14 @@ class MainWindow(QMainWindow):
         self.theme.setCurrentText(self.store.theme)
         self.theme.currentTextChanged.connect(self.change_theme)
         layout.addWidget(self.theme)
+        layout.addWidget(label('Diagnostics hardware', 'heading'))
+        self.hardware = QCheckBox('Enable experimental USB OBD-II adapter access')
+        self.hardware.setChecked(self.store.hardware_enabled)
+        self.hardware.toggled.connect(self.toggle_hardware)
+        layout.addWidget(self.hardware)
+        layout.addWidget(label('Off by default. Read-only requests only (no DTC clearing, actuation or programming). '
+                               'Real hardware compatibility is unverified and needs physical testing. The deterministic '
+                               'simulator needs no hardware.', 'muted'))
         layout.addWidget(label('Local data', 'heading'))
         path = label(str(self.store.path), 'muted')
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -169,6 +182,17 @@ class MainWindow(QMainWindow):
         self.theme.blockSignals(False)
         self.apply_theme(self.store.theme)
         self.result.setText(f'Database restored. Previous workspace saved to: {safety}')
+
+    def toggle_hardware(self, enabled: bool) -> None:
+        try:
+            self.store.set_hardware_enabled(enabled)
+        except sqlite3.Error:
+            self.hardware.blockSignals(True)
+            self.hardware.setChecked(self.store.hardware_enabled)
+            self.hardware.blockSignals(False)
+            QMessageBox.critical(self, 'Setting unavailable', 'Unable to save the hardware setting.')
+            return
+        self.diagnostics_page.refresh()
 
     def change_theme(self, theme: str) -> None:
         try:
