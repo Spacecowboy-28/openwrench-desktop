@@ -1,14 +1,16 @@
 """Persistence for guided diagnostic runs (Milestone 5).
 
 Stores the tree id/version and the chosen path so a run is reproducible. Nothing
-here evaluates a tree; it only records what the user confirmed.
+here evaluates a tree; it only records what the user confirmed. A run may be saved
+unfinished and later resumed; a run may also reference a historical tree revision
+that is still shipped in `diagnostic_trees.TREE_VERSIONS`.
 """
 
 import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from openwrench.diagnostic_trees import TREES
+from openwrench.diagnostic_trees import get_tree
 from openwrench.garage import text
 
 MAX_GUIDE_PATH = 128
@@ -38,10 +40,10 @@ class GuideService:
 
     def save(self, run):
         """Persist a run (from diagnostic_guide.start_run/choose) and return its id."""
-        tree = TREES.get(run['tree_id'])
-        if tree is None:
-            raise ValueError('Unknown decision tree.')
-        if run['tree_version'] != tree.version:
+        if not isinstance(run, dict) or 'tree_id' not in run:
+            raise ValueError('No guided run to save.')
+        tree = get_tree(run['tree_id'], run.get('tree_version'))
+        if run.get('tree_version') != tree.version:
             raise ValueError('The decision tree changed since this run started. Restart the guide.')
         session_id = run['session_id']
         if self.db.execute('SELECT 1 FROM diagnostic_sessions WHERE id=?', (session_id,)).fetchone() is None:
@@ -65,10 +67,30 @@ class GuideService:
                  path, evidence, datetime.now(timezone.utc).isoformat(), 1 if run['finished'] else 0))
         return identifier
 
-    def runs(self, session_id):
+    def get(self, guide_id):
+        """Fetch one saved run, or None. Path/evidence are decoded for reuse."""
+        row = self.db.execute('SELECT * FROM diagnostic_guides WHERE id=?', (guide_id,)).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record['path'] = json.loads(record['path'] or '[]')
+        record['evidence'] = json.loads(record['evidence'] or '{}')
+        return record
+
+    def unfinished(self, session_id):
+        """Saved runs for a session that can be resumed."""
+        return [record for record in self.runs(session_id, decoded=True)
+                if not record['finished']]
+
+    def runs(self, session_id, decoded=False):
         rows = self.db.execute(
             'SELECT * FROM diagnostic_guides WHERE session_id=? ORDER BY created_at', (session_id,)).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        if decoded:
+            for record in result:
+                record['path'] = json.loads(record['path'] or '[]')
+                record['evidence'] = json.loads(record['evidence'] or '{}')
+        return result
 
     def delete(self, guide_id):
         with self.db:
@@ -88,11 +110,7 @@ def validate_guide_records(data):
             seen.add(identifier)
             if row['session_id'] not in sessions:
                 raise ValueError('Orphan guided run.')
-            tree = TREES.get(row['tree_id'])
-            if tree is None:
-                raise ValueError('Guided run references an unknown tree.')
-            if not isinstance(row['tree_version'], int) or row['tree_version'] < 1:
-                raise ValueError('Invalid guided run tree version.')
+            tree = get_tree(row['tree_id'], row['tree_version'])
             if row['finished'] not in (0, 1):
                 raise ValueError('Invalid guided run finished flag.')
             if row['severity'] not in ('', 'info', 'caution', 'warning'):

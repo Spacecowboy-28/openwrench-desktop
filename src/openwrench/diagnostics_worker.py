@@ -46,6 +46,28 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def scan_codes(adapter):
+    """Read stored/pending/permanent codes, preserving each response mode.
+
+    Returns a list of (mode, tuple_of_codes_or_records) in mode order. A mode the
+    adapter cannot answer now is skipped rather than reported, so one failed read
+    never loses the modes that did answer. Only modes 03/07/0A are ever requested.
+    """
+    found = []
+    for mode in ('03', '07', '0A'):
+        try:
+            if hasattr(adapter, 'code_details'):
+                rows = adapter.code_details(mode)
+            elif hasattr(adapter, 'read_codes'):
+                rows = adapter.read_codes(mode)
+            else:
+                rows = ()
+        except Exception:
+            rows = ()
+        found.append((mode, tuple(rows)))
+    return found
+
+
 class Recorder(QObject):
     """Lives in a worker thread. Emits batches; the GUI thread stores them."""
 
@@ -84,10 +106,9 @@ class Recorder(QObject):
         deadline = self._max_seconds * 1000
         try:
             if self._scan_codes:
-                for mode in ('03', '07', '0A'):
-                    rows = adapter.codes() if hasattr(adapter, 'codes') else ()
-                    self.codes.emit(rows)
-                    break  # one consolidated read is enough for the simulator
+                # Read each read-only mode separately so the response mode -- stored,
+                # pending or permanent -- is preserved for every code.
+                self.codes.emit(scan_codes(adapter))
             while self._running and elapsed < deadline:
                 if self._cancelled:
                     break
@@ -95,7 +116,8 @@ class Recorder(QObject):
                 samples = acquire_batch(adapter, self._pids, last_good, disconnected)
                 self.batch.emit(samples, elapsed)
                 if disconnected:
-                    self.stopped.emit('completed')
+                    # The link dropped: report disconnected, distinct from a clean end.
+                    self.stopped.emit('disconnected')
                     return
                 QThread.msleep(self._interval)
                 elapsed += self._interval

@@ -27,7 +27,32 @@ SCENARIOS = {
     'misfire': ('Misfire symptoms', 'Rough idle, unstable RPM and a pending misfire code.'),
     'electrical': ('Electrical / voltage fault', 'Low charging voltage with an intermittent drop-out.'),
     'comms': ('Communication failure', 'The adapter stops responding partway through the session.'),
+    'codes': ('Code statuses', 'Stored, pending and permanent codes present together.'),
 }
+
+# Communication-failure scenario timeline (in adapter reads): the adapter first
+# stops answering (timeouts, reported as stale), then is treated as disconnected.
+COMMS_TIMEOUT_AFTER = 40
+COMMS_DISCONNECT_AFTER = 45
+
+# Mode -> the human meaning of the response. Kept here so the simulator, the
+# hardware adapter and the UI agree on one vocabulary.
+MODE_LABELS = {'03': 'Stored', '07': 'Pending', '0A': 'Permanent'}
+STATUS_FOR_MODE = {'03': 'Stored', '07': 'Pending', '0A': 'Permanent'}
+
+
+def matches_mode(status, mode):
+    """Whether a code with this status is returned by a read-only DTC mode.
+
+    Mode 03 reports stored (confirmed) codes, mode 07 pending codes and mode 0A
+    permanent codes. Permanent codes are also visible in mode 03 on most ECUs.
+    """
+    if mode == '0A':
+        return status == 'Permanent'
+    if mode == '07':
+        return status == 'Pending'
+    return status != 'Pending'
+
 
 
 class SimulatorAdapter:
@@ -71,6 +96,9 @@ class SimulatorAdapter:
             return SensorSample(key, None, self._unit(key), now, 'unsupported')
         value = self.value(key, self._tick)
         self._tick += 1
+        if not self._connected:
+            # value() may have marked the link dropped during this read.
+            return SensorSample(key, None, self._unit(key), now, 'disconnected')
         if value is None:
             return SensorSample(key, None, self._unit(key), now, 'timeout')
         return SensorSample(key, value, self._unit(key), now, 'ok')
@@ -80,11 +108,15 @@ class SimulatorAdapter:
             raise ValueError('Only read-only diagnostic modes are supported.')
         if not self._connected:
             return ()
-        return tuple(c.code for c in self.codes()
+        return tuple(c.code for c in self.codes() if matches_mode(c.status, mode))
 
-                     if (mode == '0A' and c.status == 'Permanent')
-                     or (mode == '07' and c.status == 'Pending')
-                     or (mode == '03' and c.status != 'Pending'))
+    def code_details(self, mode):
+        """Full code records for a read-only mode (description/basis preserved)."""
+        if mode not in READ_ONLY_MODES or mode not in self.capabilities.supported_dtc_modes:
+            raise ValueError('Only read-only diagnostic modes are supported.')
+        if not self._connected:
+            return ()
+        return tuple(c for c in self.codes() if matches_mode(c.status, mode))
 
     def codes(self):
         if self.scenario == 'misfire':
@@ -92,6 +124,10 @@ class SimulatorAdapter:
                     DiagnosticCode('P0300', 'Random/multiple cylinder misfire detected', 'Pending', 'warning'))
         if self.scenario == 'electrical':
             return (DiagnosticCode('P0562', 'System voltage low', 'Confirmed', 'warning'),)
+        if self.scenario == 'codes':
+            return (DiagnosticCode('P0420', 'Catalyst system efficiency below threshold', 'Stored', 'warning'),
+                    DiagnosticCode('P0301', 'Cylinder 1 misfire detected', 'Pending', 'warning'),
+                    DiagnosticCode('P0455', 'Evaporative emission system leak detected', 'Permanent', 'caution'))
         return ()
 
     # -- deterministic measurement model -----------------------------------
@@ -103,8 +139,13 @@ class SimulatorAdapter:
     def value(self, key, tick):
         """Return a value for a PID at a tick, or None to force a timeout."""
         number = int(key, 16)
-        if self.scenario == 'comms' and tick >= 40:
-            return None  # the adapter "stops responding" after 40 reads
+        if self.scenario == 'comms' and tick >= COMMS_DISCONNECT_AFTER:
+            # The adapter has fully dropped off the bus, so report a dropped link
+            # rather than a mere timeout: mark the connection closed.
+            self._connected = False
+            return None
+        if self.scenario == 'comms' and tick >= COMMS_TIMEOUT_AFTER:
+            return None  # the adapter "stops responding" but is still connected
         if self.scenario == 'electrical' and number == 0x42:
             # Deterministic dipping charging voltage.
             return round(12.1 + 0.05 * ((tick // 3) % 35), 2)

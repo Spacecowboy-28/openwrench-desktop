@@ -113,13 +113,15 @@ class DiagnosticService:
         mode = text(mode, 'Mode', 2, True).upper()
         if mode not in ('03', '07', '0A'):
             raise ValueError('Only read-only diagnostic modes are supported.')
+        from openwrench.diagnostics_sim import STATUS_FOR_MODE
+        default_status = STATUS_FOR_MODE[mode]
         rows = []
         for code in codes:
             if isinstance(code, DiagnosticCode):
                 item = dict(code=code.code, description=code.description,
                             status=code.status, severity=code.severity)
             else:
-                item = dict(code=code, description='', status='Stored', severity='')
+                item = dict(code=code, description='', status=default_status, severity='')
             value = text(item['code'], 'Diagnostic code', 10, True).upper()
             if not DTC_PATTERN.fullmatch(value):
                 raise ValueError('Invalid diagnostic code.')

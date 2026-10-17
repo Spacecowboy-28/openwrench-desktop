@@ -8,7 +8,7 @@ diagnosis is reproducible. A user may always pick any branch.
 
 from datetime import datetime, timezone
 
-from openwrench.diagnostic_trees import TREES
+from openwrench.diagnostic_trees import TREES, get_tree
 
 # Only these boolean evidence keys may be referenced by tree options.
 EVIDENCE_KEYS = frozenset({
@@ -57,11 +57,14 @@ def suggested_options(node, evidence):
     return tuple(suggested)
 
 
-def start_run(service, session_id, tree_id):
+def start_run(service, session_id, tree_id, version=None):
     """Begin a guided run against a session's evidence. Returns a run record."""
-    tree = TREES.get(tree_id)
-    if tree is None:
-        raise ValueError(f'Unknown decision tree {tree_id}.')
+    if version is None:
+        tree = TREES.get(tree_id)
+        if tree is None:
+            raise ValueError(f'Unknown decision tree {tree_id}.')
+    else:
+        tree = get_tree(tree_id, version)
     if service.session(session_id) is None:
         raise ValueError('Start or choose a diagnostic session first.')
     evidence = evidence_from_session(service, session_id)
@@ -71,6 +74,56 @@ def start_run(service, session_id, tree_id):
         'evidence': evidence, 'finished': False, 'outcome': None, 'outcome_severity': None,
     }
     return run
+
+
+def resume_run(service, stored):
+    """Rebuild an unfinished run from a saved record, using its own tree revision.
+
+    The stored tree version is honoured so a run started under an earlier revision
+    is completed against that revision, not a newer one. Raises for a completed run
+    or an unavailable revision so the caller can explain the situation.
+    """
+    if not isinstance(stored, dict) or 'tree_id' not in stored:
+        raise ValueError('No saved guided run to resume.')
+    if stored.get('finished'):
+        raise ValueError('That guided run is already complete.')
+    tree = get_tree(stored['tree_id'], stored.get('tree_version'))
+    session_id = stored.get('session_id')
+    if service.session(session_id) is None:
+        raise ValueError('The session for that guided run no longer exists.')
+    path = stored.get('path') or []
+    if isinstance(path, str):
+        import json
+        path = json.loads(path or '[]')
+    evidence = stored.get('evidence') or {}
+    if isinstance(evidence, str):
+        import json
+        evidence = json.loads(evidence or '{}')
+    # Replay the stored path so the resume point is exactly where the user left it.
+    node_id = tree.root
+    for step in path:
+        node = tree.node(node_id)
+        option = next((o for o in node.options if o.id == step.get('option')), None)
+        if option is None:
+            raise ValueError('The saved guided run path is no longer valid.')
+        node_id = option.next
+    target = tree.node(node_id)
+    return {
+        'id': stored.get('id'), 'tree_id': tree.id, 'tree_version': tree.version,
+        'session_id': session_id, 'node': node_id, 'path': list(path),
+        'started_at': stored.get('started_at') or datetime.now(timezone.utc).isoformat(),
+        'evidence': dict(evidence), 'finished': False, 'outcome': None, 'outcome_severity': None,
+    }
+
+
+def run_history(run):
+    """Ordered (node_id, option_id, label) steps recorded so far."""
+    return tuple((step['node'], step['option'], step['label']) for step in run['path'])
+
+
+def tree_for_run(run):
+    """The exact tree revision a run belongs to (never a newer one)."""
+    return get_tree(run['tree_id'], run.get('tree_version'))
 
 
 def current_node(tree, run):

@@ -11,10 +11,12 @@ import sqlite3
 import pytest
 
 from openwrench.diagnostic_guide import (
-    EVIDENCE_KEYS, choose, current_node, evidence_from_session, start_run,
-    suggested_options, transcript,
+    EVIDENCE_KEYS, choose, current_node, evidence_from_session, resume_run, run_history,
+    start_run, suggested_options, transcript,
 )
-from openwrench.diagnostic_trees import ELECTRICAL, MISFIRE, TREES, validate_tree
+from openwrench.diagnostic_trees import (
+    ELECTRICAL, MISFIRE, TREES, TREE_VERSIONS, get_tree, validate_tree,
+)
 from openwrench.diagnostics_session import DiagnosticService
 from openwrench.diagnostics_sim import SimulatorAdapter
 from openwrench.garage import Garage
@@ -238,3 +240,123 @@ def test_validate_guide_records_rejects_orphan_and_bad_evidence():
                                 'diagnostic_guides': [dict(id='x', session_id='none', tree_id='misfire',
                                                            tree_version=1, outcome='', severity='',
                                                            path='[]', evidence='{}', finished=0)]})
+
+
+# ------------------------------------------------- both guides completable / resume
+def test_both_guides_can_be_walked_to_an_outcome(workspace):
+    """Every authored guide must be completable to an outcome from its root."""
+    store, vehicle = workspace
+    service, misfire_session = _session(store, vehicle, 'misfire')
+
+    def walk_every_root_option(session, tree):
+        for root_option in tree.node(tree.root).options:
+            run = start_run(service, session, tree.id)
+            choose(tree, run, root_option.id)
+            guard = 0
+            while current_node(tree, run).kind != 'outcome' and guard < 20:
+                choose(tree, run, current_node(tree, run).options[0].id)
+                guard += 1
+            assert run['finished'] and run['outcome']
+
+    walk_every_root_option(misfire_session, MISFIRE)
+    service2, electrical_session = _session(store, vehicle, 'electrical')
+    walk_every_root_option(electrical_session, ELECTRICAL)
+
+
+def test_unfinished_run_can_be_saved_and_resumed(workspace):
+    store, vehicle = workspace
+    service, session = _session(store, vehicle, 'misfire')
+    guides = GuideService(store)
+    run = start_run(service, session, 'misfire')
+    choose(MISFIRE, run, 'cylinder')            # one step in, not finished
+    identifier = guides.save(run)
+    assert not run['finished']
+    stored = guides.get(identifier)
+    assert stored['finished'] == 0
+    resumed = resume_run(service, stored)
+    # Resume lands exactly where the run paused and keeps the same identity.
+    assert resumed['id'] == identifier
+    assert resumed['node'] == run['node']
+    assert current_node(MISFIRE, resumed).id == 'cylinder_code'
+    assert run_history(resumed)[-1][1] == 'cylinder'
+    # The resumed run can be finished and re-saved under the same id.
+    choose(MISFIRE, resumed, 'isolated')
+    assert resumed['finished']
+    guides.save(resumed)
+    assert len(guides.runs(session)) == 1
+    assert guides.get(identifier)['finished'] == 1
+
+
+def test_resume_rejects_completed_and_missing_runs(workspace):
+    store, vehicle = workspace
+    service, session = _session(store, vehicle, 'misfire')
+    guides = GuideService(store)
+    run = start_run(service, session, 'misfire')
+    choose(MISFIRE, run, 'none')                # reaches an outcome
+    identifier = guides.save(run)
+    with pytest.raises(ValueError):
+        resume_run(service, guides.get(identifier))   # already complete
+    with pytest.raises(ValueError):
+        resume_run(service, None)
+
+
+def test_unfinished_runs_are_listed_for_resume(workspace):
+    store, vehicle = workspace
+    service, session = _session(store, vehicle, 'misfire')
+    guides = GuideService(store)
+    open_run = start_run(service, session, 'misfire')
+    choose(MISFIRE, open_run, 'cylinder')
+    guides.save(open_run)
+    closed_run = start_run(service, session, 'misfire')
+    choose(MISFIRE, closed_run, 'none')
+    guides.save(closed_run)
+    unfinished = guides.unfinished(session)
+    assert len(unfinished) == 1 and unfinished[0]['finished'] == 0
+
+
+def test_run_is_bound_to_its_own_session(workspace):
+    """A run records the session it belongs to so it cannot drift to another."""
+    store, vehicle = workspace
+    service, first = _session(store, vehicle, 'misfire')
+    service, second = _session(store, vehicle, 'electrical', ticks=2)
+    assert first != second
+    run = start_run(service, first, 'misfire')
+    choose(MISFIRE, run, 'cylinder')
+    identifier = GuideService(store).save(run)
+    assert GuideService(store).runs(first)[0]['session_id'] == first
+    assert GuideService(store).runs(second) == []
+    assert GuideService(store).get(identifier)['session_id'] == first
+
+
+# --------------------------------------------- historical tree version preservation
+def test_get_tree_returns_current_and_named_revision():
+    assert get_tree('misfire').version == MISFIRE.version
+    assert get_tree('misfire', MISFIRE.version) is MISFIRE
+    with pytest.raises(ValueError):
+        get_tree('misfire', 999)          # an unavailable revision must not fall back
+    with pytest.raises(ValueError):
+        get_tree('unknown-tree')
+
+
+def test_historical_run_stays_valid_after_tree_revision(workspace, monkeypatch):
+    """A saved run referencing an older revision must remain loadable and valid."""
+    store, vehicle = workspace
+    service, session = _session(store, vehicle, 'misfire')
+    # Simulate a future revision: the live tree becomes v2 while v1 stays archived.
+    old_tree = TREES['misfire']
+    revised = old_tree.__class__(**{**old_tree.__dict__, 'version': 2, 'title': 'Misfire symptom guide (revised)'})
+    monkeypatch.setitem(TREES, 'misfire', revised)
+    monkeypatch.setitem(TREE_VERSIONS, ('misfire', old_tree.version), old_tree)
+
+    run = start_run(service, session, 'misfire', version=old_tree.version)
+    assert run['tree_version'] == old_tree.version
+    choose(old_tree, run, 'cylinder')
+    GuideService(store).save(run)
+
+    # The stored run still validates and restores against its archived revision.
+    document = garage_document(store)
+    row = document['guides'][0]
+    assert row['tree_version'] == old_tree.version
+    validate_guide_records({'diagnostic_sessions': document['diagnostics']['diagnostic_sessions'],
+                            'diagnostic_guides': document['guides']})
+

@@ -279,6 +279,30 @@ ELECTRICAL = DiagnosticTree(
 
 TREES = {tree.id: tree for tree in (MISFIRE, ELECTRICAL)}
 
+# Every historical revision of each tree, keyed by (id, version). A saved guided
+# run stays reviewable against the exact revision it used even after the current
+# tree is updated. When a tree changes, copy the previous revision here and bump
+# the version on the live tree above.
+TREE_VERSIONS = {(tree.id, tree.version): tree for tree in TREES.values()}
+
+
+def get_tree(tree_id, version=None):
+    """Return the current tree, or a specific historical revision when given.
+
+    Raises ValueError for an unknown tree id or an unavailable version, so a
+    caller never silently falls back to a different revision than it asked for.
+    """
+    if version is None:
+        tree = TREES.get(tree_id)
+        if tree is None:
+            raise ValueError(f'Unknown decision tree {tree_id}.')
+        return tree
+    tree = TREE_VERSIONS.get((tree_id, int(version)))
+    if tree is None:
+        raise ValueError(
+            f'Decision tree {tree_id} version {version} is not available in this build.')
+    return tree
+
 
 def validate_tree(tree):
     """Structural validation, run at import-by-test time and on load."""

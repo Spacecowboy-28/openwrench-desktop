@@ -11,7 +11,7 @@ import sqlite3
 import pytest
 
 from openwrench.diagnostics import (
-    MAX_SESSION_SAMPLES, PID_CATALOG, format_sample, pid_key, pid_meta,
+    MAX_SESSION_SAMPLES, PID_CATALOG, DiagnosticCode, format_sample, pid_key, pid_meta,
 )
 from openwrench.diagnostics_hardware import (
     ElmAdapter, UnsupportedRequest, decode_dtc, parse_dtcs, parse_pid_response,
@@ -63,11 +63,24 @@ def test_simulator_scenarios_are_in_bounds_and_labelled():
 def test_simulator_reports_unsupported_timeout_and_disconnected():
     adapter = SimulatorAdapter('comms', pids=(0x0C,))
     adapter.connect()
-    statuses = [adapter.read_pid(0x0C).status for _ in range(45)]
-    assert 'ok' in statuses and statuses[-1] == 'timeout'
+    statuses = [adapter.read_pid(0x0C).status for _ in range(42)]
+    assert 'ok' in statuses and 'timeout' in statuses
     assert adapter.read_pid(0x0D).status == 'unsupported'
     adapter.disconnect()
     assert adapter.read_pid(0x0C).status == 'disconnected'
+
+
+def test_simulator_comms_loses_the_link_after_timeouts():
+    """The communication-failure scenario must reach a true disconnected state."""
+    from openwrench.diagnostics_sim import COMMS_DISCONNECT_AFTER, COMMS_TIMEOUT_AFTER
+    adapter = SimulatorAdapter('comms', pids=(0x0C,))
+    adapter.connect()
+    statuses = [adapter.read_pid(0x0C).status for _ in range(COMMS_DISCONNECT_AFTER + 1)]
+    assert statuses[0] == 'ok'
+    # Timeouts come before the drop, so stale data is never shown as fresh.
+    assert statuses[COMMS_TIMEOUT_AFTER] == 'timeout'
+    assert statuses[-1] == 'disconnected'
+    assert adapter.connected is False
 
 
 def test_simulator_codes_by_mode():
@@ -78,6 +91,27 @@ def test_simulator_codes_by_mode():
     assert adapter.read_codes('03') == ()
     with pytest.raises(ValueError):
         adapter.read_codes('04')  # clear-DTC mode is never allowed
+
+
+def test_matches_mode_maps_status_to_read_only_mode():
+    from openwrench.diagnostics_sim import matches_mode
+    # Pending codes only answer mode 07; stored/confirmed answer 03; permanent 0A.
+    assert matches_mode('Pending', '07') and not matches_mode('Pending', '03')
+    assert matches_mode('Stored', '03') and not matches_mode('Stored', '07')
+    assert matches_mode('Confirmed', '03')
+    assert matches_mode('Permanent', '0A') and matches_mode('Permanent', '03')
+    assert not matches_mode('Permanent', '07')
+
+
+def test_code_status_scenario_returns_each_status_in_its_mode():
+    adapter = SimulatorAdapter('codes'); adapter.connect()
+    stored = adapter.read_codes('03')
+    pending = adapter.read_codes('07')
+    permanent = adapter.read_codes('0A')
+    assert set(stored) == {'P0420', 'P0455'}      # stored + permanent visible in 03
+    assert set(pending) == {'P0301'}
+    assert set(permanent) == {'P0455'}
+    assert 'P0301' not in stored                   # a pending code is not stored
 
 
 def test_acquire_batch_marks_stale_after_timeout():
@@ -361,3 +395,59 @@ def test_validate_diagnostic_records_accepts_clean_payload(workspace):
     service.append(session, [], 1, 0)
     data = read_tables(store.connection)
     validate_diagnostic_records(data)  # must not raise
+
+
+# ---------------------------------------------------- code mode tracking (bug fix)
+def test_scan_codes_preserves_each_response_mode():
+    from openwrench.diagnostics_worker import scan_codes
+    adapter = SimulatorAdapter('codes'); adapter.connect()
+    results = scan_codes(adapter)
+    by_mode = {mode: records for mode, records in results}
+    assert {c.code for c in by_mode['03']} == {'P0420', 'P0455'}
+    assert {c.code for c in by_mode['07']} == {'P0301'}
+    assert {c.code for c in by_mode['0A']} == {'P0455'}
+    # Status travels with each record, so the UI can show the true status per mode.
+    assert all(c.status == 'Pending' for c in by_mode['07'])
+
+
+def test_scan_codes_survives_a_failing_mode():
+    """One failed mode read must not discard the modes that answered."""
+    from openwrench.diagnostics_worker import scan_codes
+
+    class Flaky:
+        def code_details(self, mode):
+            if mode == '07':
+                raise OSError('adapter dropped mid-scan')
+            return {'03': (DiagnosticCode('P0420', 'Catalyst', 'Stored', 'warning'),),
+                    '0A': ()}.get(mode, ())
+
+    by_mode = dict(scan_codes(Flaky()))
+    assert by_mode['03'] and by_mode['07'] == () and by_mode['0A'] == ()
+
+
+def test_add_codes_defaults_string_status_from_mode(workspace):
+    store, vehicle = workspace
+    service = DiagnosticService(store)
+    session = service.start(vehicle, 'simulator', 'normal')
+    # A bare code string arriving from mode 07 must default to Pending, not Stored.
+    service.add_codes(session, ['P0301'], '07')
+    assert service.codes(session)[0]['status'] == 'Pending'
+    service.add_codes(session, ['P0420'], '03')
+    assert {c['status'] for c in service.codes(session)} == {'Pending', 'Stored'}
+
+
+def test_stored_pending_and_permanent_codes_keep_their_own_mode(workspace):
+    """Regression: pending codes must not be stored as mode 03."""
+    store, vehicle = workspace
+    service = DiagnosticService(store)
+    session = service.start(vehicle, 'simulator', 'codes')
+    from openwrench.diagnostics_worker import scan_codes
+    adapter = SimulatorAdapter('codes'); adapter.connect()
+    for mode, records in scan_codes(adapter):
+        service.add_codes(session, records, mode)
+    by_code = {row['code']: row for row in service.codes(session)}
+    assert by_code['P0301']['mode'] == '07' and by_code['P0301']['status'] == 'Pending'
+    assert by_code['P0455']['mode'] in ('03', '0A')
+    # A pending code is never recorded under mode 03.
+    assert not any(row['code'] == 'P0301' and row['mode'] == '03' for row in service.codes(session))
+

@@ -35,12 +35,38 @@ Milestone 3 is on `dev/milestone-3` (PR #4). Milestones 4 and 5 are implemented 
   branch. A user may always choose any option.
 - Guided runs participate in export, validated restore and CSV export.
 
+## Usability and quality pass (post-acceptance)
+
+After physical Windows GUI testing of Milestones 4 and 5, this pass fixes and
+improves:
+
+- Diagnostics page is now inside a scroll area, so nothing clips at small window
+  sizes or high display scaling; controls, readouts and the graph sit in titled
+  cards with a consistent grid.
+- The graph plots one selectable sensor at a time with labelled axes, unit and
+  elapsed-time ticks; unrelated units are no longer overlaid. Live history is
+  bounded per PID (`MAX_LIVE_POINTS`) and saved sessions load into the graph.
+- Fixed `on_batch` calling `setText` on `None`: only real readout labels are
+  updated, and history is captured for every supported PID.
+- Codes now keep their real response mode. The acquisition layer reads modes
+  03/07/0A separately, so a pending code is stored as mode 07, not mode 03.
+- Guided diagnosis: options are full-width clickable buttons, both trees reach an
+  outcome, unfinished runs can be saved and resumed (against their own tree
+  revision), a run stays bound to its session, and selecting a guide that does not
+  match the evidence shows an informational note without blocking the choice.
+- Historical tree revisions are retained in `TREE_VERSIONS`/`get_tree`, so a run
+  saved under an older tree version remains valid after a future update.
+- Communication failure is distinct end to end: the simulator timeouts, then drops
+  the link; the worker reports `disconnected`; the UI stores the session as failed.
+  Cancellation and worker cleanup are covered by tests.
+
 ## Validation and commits
 
-Baseline: 143 tests passed before these changes. Current local suite: 191 passed
-under `QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore
-rejection, simulator determinism, protocol parsing via a fake transport,
-off-thread recording and the guided walk are covered.
+Earlier suite: 191 passed. Current suite: 215 passed under
+`QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore rejection,
+simulator determinism, protocol parsing via a fake transport, off-thread recording,
+code-mode tracking, bounded history, the guided walk/resume and both decision trees
+are covered.
 
 ## Remaining limitations
 

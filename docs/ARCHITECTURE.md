@@ -29,6 +29,27 @@ Qt deployment: https://doc.qt.io/qtforpython-6/deployment/index.html
 `diagnostics.py` defines a read-only adapter contract. The diagnostic contract does not implement a vehicle driver. Repair providers
 now expose metadata and external references, without a scraper or content mirror.
 
+`diagnostics_sim.py` is a deterministic read-only simulator (normal, misfire,
+electrical, communication-failure and code-status scenarios). `diagnostics_hardware.py`
+is an optional, disabled-by-default ELM327/STN adapter that only ever transmits
+read-only service modes; mode 04 is refused before any byte is sent. Both share one
+contract, one sample-status vocabulary (`ok`/`unsupported`/`stale`/`timeout`/`disconnected`)
+and one code-mode vocabulary (`03` stored, `07` pending, `0A` permanent).
+`diagnostics_worker.py` acquires samples and codes on a worker `QThread`; SQLite
+never crosses a thread boundary and the GUI thread owns all persistence.
+`diagnostics_session.py` persists bounded sessions, samples and codes transactionally.
+`diagnostics_ui.py` is a scrollable native page: a single selectable-sensor graph with
+labelled axes, a fixed readout grid, readable code/session lists and a guided-diagnosis
+panel. Live per-PID history is bounded, so a long session cannot grow the GUI.
+
+`diagnostic_trees.py` holds authored, versioned misfire and electrical reasoning
+aid trees (not manufacturer procedures); every outcome carries actions and a severity
+and never asserts a repair value. `diagnostic_guide.py` derives boolean evidence only
+from stored session data and *suggests* branches while allowing any manual choice.
+`guide_service.py`/`guide_schema.py` persist guided runs (schema 6) with the tree id and
+version and the chosen path. A saved run can be resumed against the exact revision it
+started under, so a later tree update never silently rewords an earlier diagnosis.
+
 Future serial, network, PDF indexing and polling work must use a worker thread
 or process with bounded timeouts and Qt signals back to the UI. SQLite connections
 remain in their owning thread. Serial reads must never block the GUI event loop.
