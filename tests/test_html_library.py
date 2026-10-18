@@ -50,9 +50,26 @@ def test_zip_symlink_duplicate_collision_and_bomb():
                 info=zipfile.ZipInfo('link.html');info.create_system=3;info.external_attr=(stat.S_IFLNK|0o777)<<16;z.writestr(info,b'/etc/passwd')
             elif mode=='duplicate':z.writestr('INDEX.HTML',b'duplicate')
             elif mode=='collision':z.writestr('index.html/child.html',b'bad')
-            else:z.writestr('huge.txt',b'x'*(2*1024*1024))
+            # A bomb must exceed the declared per-file budget. A high compression
+            # ratio alone is legitimate for generated torque tables, so the ratio
+            # heuristic was removed and the declared size is now the contract.
+            else:z.writestr('huge.html',b'<p>'+b'x'*(11*1024*1024)+b'</p>')
         with pytest.raises(ValueError):read_zip(output.getvalue())
     with pytest.raises(ValueError):read_zip(b'not zip')
+
+
+def test_high_ratio_manual_is_accepted_and_repackable(tmp_path):
+    """A repetitive manual must import as a ZIP and as a folder, then repack."""
+    page=b'<html><body><table>'+b'<tr><td>Wheel nut torque 120 Nm</td></tr>'*180000+b'</table></body></html>'
+    output=BytesIO()
+    with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:z.writestr('index.html',page)
+    raw=output.getvalue()
+    assert len(page)/len(raw) > 200
+    assert read_zip(raw)['index.html']==page
+    folder=tmp_path/'manual';folder.mkdir()
+    (folder/'index.html').write_bytes(page)
+    files=import_source(folder/'index.html')
+    assert pack(files)==pack(read_zip(pack(files)))
 
 
 def test_links_report_and_sections(tmp_path):
@@ -199,6 +216,40 @@ def test_native_navigation_bookmarks(library,tmp_path,app):
     viewer.close();app.processEvents()
 
 
+def test_viewer_does_not_parse_bundle_on_gui_thread(library,tmp_path,app,monkeypatch):
+    """Opening a manual must not re-read or re-inspect the bundle on the GUI thread."""
+    from PySide6.QtTest import QTest
+    lib,vehicle=library;identifier=lib.import_document(synthetic_html(tmp_path/'manual.zip'),details(),[vehicle])
+    # html_files() runs inside the worker process, so patching it in this process
+    # only fails if the GUI thread itself calls it.
+    def forbidden(*args,**kwargs):raise AssertionError('GUI thread re-read the bundle')
+    monkeypatch.setattr(Library,'html_files',forbidden)
+    viewer=HtmlViewer(lib,identifier)
+    for _ in range(300):
+        app.processEvents();QTest.qWait(10)
+        if viewer.current:break
+    assert viewer.current==('index.html','')
+    assert viewer.browser.files['index.html']
+    assert isinstance(viewer.report,list) and viewer.report
+    viewer.close();app.processEvents()
+
+
+def test_read_bundle_dir_matches_read_zip_and_rejects_symlinks(tmp_path):
+    from openwrench.html_bundle import read_bundle_dir
+    files={'index.html':b'<p>a</p>','assets/diagram.svg':b'<svg xmlns="http://www.w3.org/2000/svg"/>','notes.txt':b'x'}
+    root=tmp_path/'bundle';root.mkdir()
+    for name,content in files.items():
+        path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(content)
+    assert read_bundle_dir(root)==read_zip(pack(files))
+    outside=tmp_path/'secret.html';outside.write_bytes(b'<p>private</p>')
+    try:(root/'linked.html').symlink_to(outside)
+    except OSError:pytest.skip('OS denies creating symlinks for this user')
+    with pytest.raises(ValueError,match='symbolic link'):read_bundle_dir(root)
+    (root/'linked.html').unlink()
+    (root/'weird.exe').write_bytes(b'MZ')
+    with pytest.raises(ValueError,match='Unsupported bundle file'):read_bundle_dir(root)
+
+
 def test_html_restore_failure_rolls_back(library,tmp_path,monkeypatch):
     lib,vehicle=library;identifier=lib.import_document(synthetic_html(tmp_path/'manual.zip'),details(),[vehicle])
     backup=lib.store.backup(tmp_path/'snapshot.sqlite3')
@@ -250,6 +301,25 @@ def test_archive_size_and_case_alias_limits(monkeypatch):
     content=pack({'index.html':b'<p>test</p>'})
     monkeypatch.setattr(html_bundle,'MAX_TOTAL',1)
     with pytest.raises(ValueError,match='expansion'):read_zip(content)
+
+
+def test_stored_archive_limit_allows_repacking(monkeypatch):
+    """MAX_ARCHIVE must exceed MAX_TOTAL so any legal bundle survives pack()."""
+    from openwrench import html_bundle
+    assert html_bundle.MAX_ARCHIVE > html_bundle.MAX_TOTAL
+    content=pack({'index.html':b'<p>test</p>'})
+    monkeypatch.setattr(html_bundle,'MAX_ARCHIVE',1)
+    with pytest.raises(ValueError,match='stored-size'):read_zip(content)
+
+
+def test_unclosed_drop_tags_are_reported(tmp_path):
+    files=read_zip(pack({'index.html':b'<p>Before</p><script>var x=1;<p>After</p>',
+                         'clean.html':b'<p>fine</p>'}))
+    assert StaticHTML('index.html',files).unclosed=='script'
+    assert StaticHTML('clean.html',files).unclosed is None
+    reasons=[i['reason'] for i in inspect(files) if i['page']=='index.html']
+    assert any('Unclosed' in r for r in reasons)
+    assert not [i for i in inspect(files) if i['page']=='clean.html']
 
 
 def test_cancel_after_parsing_is_atomic(library,tmp_path):

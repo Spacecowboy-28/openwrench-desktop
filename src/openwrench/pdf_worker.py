@@ -27,7 +27,14 @@ def main(arguments):
                 from openwrench.pdf_engine import render
                 result = render(library.local_path(job['id']),job['page'],job['scale'],job['output'])
             elif operation == 'materialize':
-                result = str(library.local_path(job['id']))
+                from openwrench.html_bundle import inspect, read_bundle_dir
+                root = library.local_path(job['id'])
+                # Read and inspect the already-validated bundle here so the GUI
+                # thread never re-inflates the ZIP or reparses every page.
+                files = read_bundle_dir(root)
+                issues = inspect(files)
+                print(json.dumps(dict(bundle=dict(root=str(root),files=list(files)))),flush=True)
+                result = dict(root=str(root),issues=issues)
             else:
                 raise ValueError('Unknown document operation.')
         print(json.dumps(dict(result=result)),flush=True)

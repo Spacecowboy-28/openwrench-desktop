@@ -10,12 +10,19 @@ import unicodedata
 from urllib.parse import unquote, urlsplit, quote
 import zipfile
 
-MAX_ARCHIVE = 50 * 1024 * 1024
+# MAX_ARCHIVE bounds the stored .zip so a single import cannot exhaust memory.
+# MAX_TOTAL bounds the decompressed content and is the real size contract; it is
+# deliberately below MAX_ARCHIVE so any legal bundle can also be stored again by
+# pack() without tripping the archive limit.
+MAX_ARCHIVE = 128 * 1024 * 1024
 MAX_TOTAL = 100 * 1024 * 1024
 MAX_FILE = 10 * 1024 * 1024
 MAX_FILES = 2000
 HTML = {'.html', '.htm'}
 SUPPORTED = HTML | {'.css', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.js', '.txt', '.ico', '.webp', '.woff', '.woff2', '.ttf', '.json', '.xml', '.md', '.map'}
+# Elements whose content is dropped: active content (security) and layout that Qt
+# cannot represent. A tag left open at EOF silently hides the rest of the page.
+DROP_TAGS = {'script','iframe','object','embed','form','button','textarea','select','svg','math'}
 
 
 def safe_path(name):
@@ -52,7 +59,7 @@ def decode(content):
 
 def read_zip(content, cancelled=lambda: False):
     if len(content) > MAX_ARCHIVE:
-        raise ValueError('Archive exceeds 50 MiB.')
+        raise ValueError('Archive exceeds the stored-size limit.')
     files, names, total, spellings = {}, set(), 0, {}
     try:
         with zipfile.ZipFile(BytesIO(content)) as archive:
@@ -76,8 +83,12 @@ def read_zip(content, cancelled=lambda: False):
                         or info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
                     raise ValueError('Duplicate, encrypted or unsafe archive entry.')
                 names.add(folded)
+                # The declared size is the budget; a mismatch against the bytes
+                # actually read below catches a lying header. Legitimate manuals
+                # compress far past 200:1, so no compression-ratio heuristic is
+                # applied -- it rejected real generated torque tables and folders.
                 total += info.file_size
-                if info.file_size > MAX_FILE or total > MAX_TOTAL or info.file_size > max(1024*1024, info.compress_size*200):
+                if info.file_size > MAX_FILE or total > MAX_TOTAL:
                     raise ValueError('Archive expansion limit exceeded.')
                 if not info.is_dir():
                     if PurePosixPath(name).suffix.lower() not in SUPPORTED:
@@ -87,8 +98,11 @@ def read_zip(content, cancelled=lambda: False):
                     if len(data) != info.file_size or len(data) > MAX_FILE:
                         raise ValueError('Invalid archive size.')
                     files[name] = data
+            # A file may not also be used as a directory by another entry.
+            # The casefold set is built once so this stays linear in entry count.
+            existing = {n.casefold() for n in files}
             for name in files:
-                if any(str(parent).casefold() in {n.casefold() for n in files} for parent in PurePosixPath(name).parents if str(parent) != '.'):
+                if any(str(parent).casefold() in existing for parent in PurePosixPath(name).parents if str(parent) != '.'):
                     raise ValueError('Conflicting archive paths.')
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
         raise ValueError('Invalid or unsupported ZIP archive.') from error
@@ -136,11 +150,14 @@ def import_source(source, cancelled=lambda: False):
     if path.suffix.lower() not in HTML:
         raise ValueError('Choose HTML, HTM or ZIP.')
     # Only the selected page's reachable resources below its parent are collected.
-    root, pending, files, total = path.parent.resolve(), [safe_path(path.name)], {}, 0
-    while pending:
+    # 'pending' doubles as a set so a page with many distinct references is linear.
+    root, files, total = path.parent.resolve(), {}, 0
+    queue, pending = [safe_path(path.name)], {safe_path(path.name)}
+    while queue:
         if cancelled():
             raise InterruptedError('Import cancelled.')
-        name = pending.pop()
+        name = queue.pop()
+        pending.discard(name)
         if name in files:
             continue
         target = root / name
@@ -162,13 +179,71 @@ def import_source(source, cancelled=lambda: False):
             try:
                 linked, _ = resolve(name, reference)
                 if linked not in files and linked not in pending:
-                    pending.append(linked)
+                    queue.append(linked); pending.add(linked)
             except ValueError:
                 pass
     return files
 
 
+def read_bundle_dir(root):
+    """Load an already-materialized bundle directory without re-inflating the ZIP.
+
+    materialize_html() has already validated and atomically written the entries.
+    Re-reading them costs one filesystem walk instead of a full read_zip() plus
+    SHA-256, which is what kept large manuals on the GUI thread for seconds.
+    The same path/suffix/size/symlink rules still apply so the result matches
+    read_zip() exactly.
+    """
+    root = Path(root)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError('Bundle directory is missing or unsafe.')
+    files, total = {}, 0
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('Bundle directory contains a symbolic link.')
+        if not path.is_file():
+            continue
+        name = safe_path(path.relative_to(root).as_posix())
+        if PurePosixPath(name).suffix.lower() not in SUPPORTED:
+            raise ValueError('Unsupported bundle file: ' + name)
+        content = path.read_bytes()
+        total += len(content)
+        if len(content) > MAX_FILE or total > MAX_TOTAL or len(files) >= MAX_FILES:
+            raise ValueError('Bundle directory exceeds the size limit.')
+        files[name] = content
+    if not any(PurePosixPath(n).suffix.lower() in HTML for n in files):
+        raise ValueError('Bundle contains no HTML documents.')
+    return files
+
+
+class _DropScanner(HTMLParser):
+    """Tracks only whether a drop/style element is still open at end of input."""
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.stack, self.style = [], False
+    def handle_starttag(self, tag, attrs):
+        if tag == 'style':
+            self.style = True
+        elif tag in DROP_TAGS and tag != 'embed':
+            self.stack.append(tag)
+    def handle_endtag(self, tag):
+        if tag == 'style':
+            self.style = False
+        elif self.stack and tag == self.stack[-1]:
+            self.stack.pop()
+
+
+def unclosed_drop_tag(content):
+    """Name of a drop/style element left open, which hides all following content."""
+    scanner = _DropScanner()
+    scanner.feed(decode(content))
+    if scanner.stack:
+        return scanner.stack[-1]
+    return 'style' if scanner.style else None
+
+
 def inspect(files):
+    """Report missing/blocked references and pages whose trailing content was dropped."""
     parsed = {n: References(decode(v)) for n,v in files.items() if PurePosixPath(n).suffix.lower() in HTML}
     issues = []
     for name, content in files.items():
@@ -191,6 +266,13 @@ def inspect(files):
             issues.append({'page': name, 'reference': ref[:1000], 'reason': reason})
             if len(issues) >= 5000:
                 return issues
+    for name, content in files.items():
+        if name not in parsed:
+            continue
+        dropped = unclosed_drop_tag(content)
+        if dropped:
+            issues.append({'page': name, 'reference': '<'+dropped+'>',
+                           'reason': 'Unclosed '+dropped+' tag; content after it is not shown or indexed'})
     return issues
 
 
@@ -216,7 +298,7 @@ def clean_css(value):
 
 class StaticHTML(HTMLParser):
     TAGS = set('html head body title p div span br hr h1 h2 h3 h4 h5 h6 a b strong i em u s sub sup pre code blockquote ul ol li dl dt dd table thead tbody tfoot tr td th caption img center font'.split())
-    DROP = {'script','iframe','object','embed','form','button','textarea','select','svg','math'}
+    DROP = DROP_TAGS
     def __init__(self, name, files):
         super().__init__(convert_charrefs=True)
         self.name, self.files = name, files
@@ -228,6 +310,14 @@ class StaticHTML(HTMLParser):
         self.new_section('')
         self.feed(decode(files[name]))
         self.sections[-1]['text'] = ' '.join(self.words)
+        # A drop tag or <style> still open at EOF means the parser swallowed every
+        # later tag and its text. Report it so the page is not silently truncated.
+        if self.blocked:
+            self.unclosed = self.blocked[-1]
+        elif self.style is not None:
+            self.unclosed = 'style'
+        else:
+            self.unclosed = None
     def new_section(self, anchor):
         if self.sections:
             self.sections[-1]['text'] = ' '.join(self.words)

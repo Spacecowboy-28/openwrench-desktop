@@ -34,7 +34,8 @@ def main():
         assert Library(store).search('brake')[0]['id']==identifier
         store.close()
         html=worker(dict(operation='import',source=str(synthetic_html(directory/'original.zip')),metadata=details(),vehicles=[]))
-        bundle=Path(worker(dict(operation='materialize',id=html)))
+        materialized=worker(dict(operation='materialize',id=html))
+        bundle=Path(materialized['root'] if isinstance(materialized,dict) else materialized)
         assert (bundle/'procedures'/'brake.htm').is_file()
         store=Store(database)
         assert Library(store).search('caliper')[0]['id']==html

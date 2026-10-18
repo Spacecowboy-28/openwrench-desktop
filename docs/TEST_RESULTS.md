@@ -10,7 +10,7 @@ fixed here, each with a regression test.
 
 | Check | Result | Scope |
 | --- | --- | --- |
-| `python -m pytest -q` | 215 passed, ~53 seconds | Full suite including new diagnostics/guide/UI tests |
+| `python -m pytest -q` | 220 passed, ~53 seconds | Full suite including new diagnostics/guide/UI and HTML-hardening tests |
 | Diagnostics page scroll + layout | Passed | `QScrollArea` present; cards, grids, no clipping under offscreen rendering |
 | Single selectable-sensor graph | Passed | One sensor plotted with axes/unit/time; selector switches sensor |
 | Graph reflects saved session | Passed | Reviewed session loads stored points into the graph |
@@ -22,6 +22,11 @@ fixed here, each with a regression test.
 | Historical tree version | Passed | Run from an archived revision still validates after the live tree is revised |
 | Communication failure | Passed | Timeout then `disconnected`; session stored as failed |
 | Cancellation / worker cleanup | Passed | Stop leaves no active thread/recorder; status `interrupted` |
+| HTML high-ratio manual import | Fixed | Ratio heuristic removed; repetitive manual imports and repacks; regression test |
+| Archive/stored-size budgets | Passed | `MAX_ARCHIVE` > `MAX_TOTAL`; declared-size rejection tested |
+| Deep-path archive read | Fixed | Quadratic conflict check replaced; ~2690 ms to ~144 ms on the deep-path case |
+| Unclosed drop-tag reporting | Fixed | `inspect()` flags truncated pages; shared `DROP_TAGS`; regression test |
+| Large-manual open responsiveness | Fixed | Bundle read + `inspect()` moved to the `materialize` worker; 32 MiB render cache; GUI-thread re-read guard test |
 | Windows CI | Pending | Runs on `windows-2022`; this pass was developed and tested on Linux only |
 | Physical Windows acceptance | Pending | Owner to re-verify the redesigned Diagnostics page and guides on Windows |
 

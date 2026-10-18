@@ -170,7 +170,15 @@ stored data, never executed. Only links within the imported bundle navigate.
 A fresh staging folder plus rename materializes validated files; existing cached
 files must match stored bytes. The viewer reads canonical validated database bytes,
 not arbitrary cached files. Import/extraction remains in the existing QProcess
-worker; sanitized page layout/resource inspection has bounded GUI-thread work.
+worker. The `materialize` operation also loads the validated bundle directory and
+audits references inside that worker and reports the result alongside the path, so
+the GUI thread only walks the staged directory (a few milliseconds) instead of
+re-inflating the ZIP and reparsing every page. Rendered pages are memoized in a
+bounded 32 MiB cache so Back/Forward/Home do not re-parse. Archive budgets are
+declared-size based: `MAX_ARCHIVE` (128 MiB stored) intentionally exceeds
+`MAX_TOTAL` (100 MiB expanded) so any legal bundle can be repacked, and a
+compression-ratio heuristic is deliberately absent because it rejected legitimate
+repetitive manuals.
 
 Qt supports a limited rich-text subset, not general browser layout. This tradeoff
 avoids adding a Chromium scripting/network engine for static documentation:

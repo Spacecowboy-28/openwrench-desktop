@@ -236,13 +236,18 @@ unsupported. Fonts and other accepted supporting files remain in the stored
 bundle but do not gain execution or arbitrary file access. No WebEngine is needed
 for this static scope. User manuals are never scraped or included in the repo.
 
-ZIP limits: 50 MiB compressed, 100 MiB expanded, 10 MiB per member, 2,000 entries,
-200:1 expansion above 1 MiB, 5,000 indexed sections and 20 MiB text. Unsupported
+ZIP limits: 128 MiB stored, 100 MiB expanded, 10 MiB per member, 2,000 entries,
+5,000 indexed sections and 20 MiB text. A declared size above the budget rejects
+the archive; a header that lies about its size is caught when the member is read,
+so no compression-ratio heuristic is applied and repetitive generated manuals
+(torque tables, repeated inline styles) import normally. Unsupported
 member extensions reject the archive with a filename. HTML/HTM, CSS, common raster
 images, SVG, JS, TXT, font files, JSON/XML/Markdown/source maps are accepted as
 stored data; only sanitized HTML/CSS and approved images are rendered. Unsafe
 paths, links, special files, Windows aliases, duplicate names and encrypted
-entries reject the archive. Imports run in cancellable worker processes.
+entries reject the archive. Imports run in cancellable worker processes; bundle
+reading and reference inspection also run in the worker so opening a large manual
+never blocks the interface.
 
 Schema 4 adds document format and stable HTML section mappings. Existing PDFs
 retain their IDs/bookmarks. Upgrade creates a pre-v4 SQLite backup; complete

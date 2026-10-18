@@ -23,13 +23,15 @@ class DocumentTask(QObject):
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(lambda:self.cancel('Document operation timed out.'))
-        self.buffer,self.result,self.error,self.done = '',None,'',False
+        self.buffer,self.result,self.error,self.done,self.bundle = '',None,'',False,None
 
     def start(self):
         file=self.directory/'job.json'
         file.write_text(json.dumps(self.job),'utf-8')
         args=['--pdf-worker',str(file)] if getattr(sys,'frozen',False) else ['-m','openwrench.pdf_worker',str(file)]
-        self.timer.start(30000 if self.job['operation']=='render' else 300000)
+        # Rendering one page is quick; indexing/materializing a large manual is not,
+        # so only 'render' keeps the short bound.
+        self.timer.start(30000 if self.job['operation']=='render' else 600000)
         self.process.start(sys.executable,args)
 
     def read_output(self):
@@ -40,6 +42,7 @@ class DocumentTask(QObject):
                 value=json.loads(line)
                 if 'progress' in value:self.progress.emit(value['progress'],value['total'])
                 if 'result' in value:self.result=value['result']
+                if 'bundle' in value:self.bundle=value['bundle']
                 if 'error' in value:self.error=value['error']
             except (ValueError,TypeError):
                 self.error='Invalid document worker response.'

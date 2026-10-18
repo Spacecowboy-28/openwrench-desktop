@@ -169,7 +169,11 @@ class PdfViewer(QDialog):
     def external(self):
         if self.task and not self.task.done:self.task.cancel()
         self.task=DocumentTask(self.library.store,'materialize',dict(id=self.identifier),self)
-        self.task.finished.connect(lambda result,message:error(self,message) if message else QDesktopServices.openUrl(QUrl.fromLocalFile(result)))
+        def opened(result,message):
+            if message:error(self,message);return
+            root=result.get('root') if isinstance(result,dict) else result
+            QDesktopServices.openUrl(QUrl.fromLocalFile(root))
+        self.task.finished.connect(opened)
         self.task.start()
 
     def reject(self):

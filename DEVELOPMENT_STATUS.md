@@ -60,13 +60,38 @@ improves:
   the link; the worker reports `disconnected`; the UI stores the session as failed.
   Cancellation and worker cleanup are covered by tests.
 
+## Milestone 3 HTML hardening (found during a read-only audit of PR #4)
+
+An engineering audit of the Milestone 3 offline-HTML code found and fixed:
+
+- A compression-ratio heuristic in `read_zip` rejected legitimate high-ratio
+  manuals (repetitive torque tables, repeated inline styles). It was removed; the
+  declared per-member and total budgets are now the only contract, and a header
+  that understates its size is still caught while the member is read.
+- The archive budget was clarified: `MAX_ARCHIVE` (128 MiB stored) must exceed
+  `MAX_TOTAL` (100 MiB expanded) so `pack()` always round-trips a legal bundle.
+- `read_zip`'s path-conflict check was quadratic in the number of members; a
+  parent-is-a-file lookup replaced the nested scan (deep-path case ~2690 ms to
+  ~144 ms).
+- `inspect()` now reports a page whose content was truncated because a
+  `script`/`style`/`iframe` tag was left unclosed, instead of silently dropping
+  the remainder. `StaticHTML` and the cheap `_DropScanner` share `DROP_TAGS`.
+- GUI-thread blocking while opening a large manual was removed. The
+  `materialize` worker operation now also loads the validated bundle directory
+  (`read_bundle_dir`) and runs `inspect()` off-thread, returning
+  `{root, issues}`; the GUI thread only walks the staged directory. Rendered pages
+  are memoized in a bounded 32 MiB cache so Back/Forward/Home do not re-parse.
+
 ## Validation and commits
 
-Earlier suite: 191 passed. Current suite: 215 passed under
+Earlier suite: 191 passed. Current suite: 220 passed under
 `QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore rejection,
 simulator determinism, protocol parsing via a fake transport, off-thread recording,
 code-mode tracking, bounded history, the guided walk/resume and both decision trees
-are covered.
+are covered. The HTML hardening adds tests for high-ratio import/repack, archive
+and stored-size budgets, unclosed drop tags, bundle-directory/read_zip parity with
+symlink rejection, and a guard that opening a manual never re-reads the bundle on
+the GUI thread.
 
 ## Remaining limitations
 
