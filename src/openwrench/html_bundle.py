@@ -23,6 +23,10 @@ SUPPORTED = HTML | {'.css', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.j
 # Elements whose content is dropped: active content (security) and layout that Qt
 # cannot represent. A tag left open at EOF silently hides the rest of the page.
 DROP_TAGS = {'script','iframe','object','embed','form','button','textarea','select','svg','math'}
+# inspect() caps the reference list; the cap is reported as its own issue so a
+# caller never mistakes a clipped report for a complete one.
+MAX_ISSUES = 5000
+TRUNCATED = 'Too many reference issues; the list below is incomplete.'
 
 
 def safe_path(name):
@@ -264,7 +268,10 @@ def inspect(files):
             except ValueError:
                 reason = 'Blocked external or unsafe URL'
             issues.append({'page': name, 'reference': ref[:1000], 'reason': reason})
-            if len(issues) >= 5000:
+            if len(issues) >= MAX_ISSUES:
+                # Explicit sentinel so callers can tell a complete report from a
+                # clipped one instead of assuming every issue was listed.
+                issues.append({'page': '', 'reference': '', 'reason': TRUNCATED})
                 return issues
     for name, content in files.items():
         if name not in parsed:

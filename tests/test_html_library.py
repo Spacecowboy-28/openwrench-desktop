@@ -322,6 +322,15 @@ def test_unclosed_drop_tags_are_reported(tmp_path):
     assert not [i for i in inspect(files) if i['page']=='clean.html']
 
 
+def test_inspect_marks_a_truncated_report(monkeypatch):
+    from openwrench import html_bundle
+    monkeypatch.setattr(html_bundle,'MAX_ISSUES',3)
+    files=read_zip(pack({'index.html':b'<img src="a.png"><img src="b.png"><img src="c.png"><img src="d.png">'}))
+    issues=inspect(files)
+    assert issues[-1]['reason']==html_bundle.TRUNCATED
+    assert sum(1 for i in issues if i['reason']!=html_bundle.TRUNCATED)==3
+
+
 def test_cancel_after_parsing_is_atomic(library,tmp_path):
     lib,vehicle=library;source=synthetic_html(tmp_path/'manual.zip')
     cancel=[False]

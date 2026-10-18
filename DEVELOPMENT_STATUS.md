@@ -84,7 +84,7 @@ An engineering audit of the Milestone 3 offline-HTML code found and fixed:
 
 ## Validation and commits
 
-Earlier suite: 191 passed. Current suite: 220 passed under
+Earlier suite: 191 passed. Current suite: 221 passed under
 `QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore rejection,
 simulator determinism, protocol parsing via a fake transport, off-thread recording,
 code-mode tracking, bounded history, the guided walk/resume and both decision trees

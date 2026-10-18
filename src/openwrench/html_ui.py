@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QImageReader, QPainter, QTextDocument
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QDialog,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,QTextBrowser,QComboBox
-from openwrench.html_bundle import StaticHTML, safe_path, safe_svg, read_bundle_dir, HTML
+from openwrench.html_bundle import StaticHTML, safe_path, safe_svg, read_bundle_dir, HTML, TRUNCATED
 from openwrench.library_tasks import DocumentTask
 
 
@@ -93,7 +93,9 @@ class HtmlViewer(QDialog):
                 self.browser.files = read_bundle_dir(root)
                 issues = result.get('issues',[]) if isinstance(result,dict) else []
                 self.report = issues
-                self.status.setText(f'{len(issues)} missing/blocked references. Completeness is not guaranteed. Scripts disabled; static layout only.')
+                truncated = any(i['reason']==TRUNCATED for i in issues)
+                shown = sum(1 for i in issues if i['reason']!=TRUNCATED)
+                self.status.setText((f'{shown}+' if truncated else f'{shown}')+' missing/blocked references. Completeness is not guaranteed. Scripts disabled; static layout only.')
                 self.status.setToolTip('\n'.join(f"{r['page']}: {r['reason']} — {r['reference']}" for r in issues))
                 report = QPushButton('Resource report',self)
                 bar.addWidget(report)
