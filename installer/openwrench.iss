@@ -16,6 +16,9 @@
 #ifndef SourceDir
   #define SourceDir "..\dist\OpenWrench"
 #endif
+#ifndef AppNumericVersion
+  #define AppNumericVersion "0.0.0.0"
+#endif
 #ifndef OutputDir
   #define OutputDir "..\dist"
 #endif
@@ -29,6 +32,8 @@
 AppId={{7C4B2E6A-9D3F-4A5B-9C1E-6F0A1B2C3D4E}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppNumericVersion}
+VersionInfoProductTextVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
@@ -43,6 +48,9 @@ OutputBaseFilename=OpenWrench-{#AppVersion}-setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile={#SourceDir}\_internal\assets\openwrench.ico
+MinVersion=10.0.17763
+SetupLogging=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; The app is a PyInstaller onedir bundle; never let Setup reuse a running copy.
@@ -50,8 +58,9 @@ CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
-; Per-user install works without elevation; admins can still choose Program Files.
-PrivilegesRequiredOverridesAllowed=dialog
+; Install and launch as the current user, without an administrator prompt.
+; {autopf} resolves to the per-user Programs directory in this mode.
+PrivilegesRequired=lowest
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -88,7 +97,8 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     DataDir := ExpandConstant('{localappdata}\OpenWrench\OpenWrench');
-    if DirExists(DataDir) then
+    // Automation and silent uninstall always retain data and never open a prompt.
+    if (not UninstallSilent) and DirExists(DataDir) then
     begin
       if MsgBox('Also delete your OpenWrench workspace (vehicle records, repair library and backups) in:' + #13#10 +
                 DataDir + #13#10#13#10 +

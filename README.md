@@ -1,7 +1,7 @@
 # OpenWrench Desktop
 
 A local, open-source automotive workshop application. Current development
-version: **0.3.0.dev1, Repair Library**.
+version: **0.3.0.dev2, Diagnostics and Repair Library**.
 
 Add, view, edit and delete vehicles in the existing native PySide6 application.
 Record dated odometer readings and service history, including notes, parts,
@@ -9,8 +9,11 @@ optional cost and currency. SQLite stores all records locally. Internet access
 is optional. Explicit NHTSA VIN/recall requests and external repair-source links
 use the network; imported PDF/HTML manuals and their text search work offline.
 
-The application ships no factory repair specifications, simulated scans or
-hardware driver. Users supply lawful manuals and source-backed schedules. No server, browser, subscription or account is required.
+The application includes a labelled diagnostic simulator, session recording and
+guided misfire/electrical decision trees. Experimental read-only USB access is
+disabled by default and has no confirmed physical-adapter compatibility. Users
+supply lawful manuals and source-backed schedules; factory repair specifications
+are not bundled. No server, browser, subscription or account is required.
 
 ## Use Vehicle Garage
 
@@ -137,15 +140,18 @@ Package the bundle for distribution:
 # Linux: relocatable tarball with a desktop entry and hicolor icons.
 python scripts/make_linux_package.py --bundle-dir dist/OpenWrench --output-dir dist
 
-# Windows: signed-ready Inno Setup installer (requires Inno Setup 6 / ISCC.exe).
+# Windows: unsigned development installer (requires Inno Setup 6 / ISCC.exe).
 python scripts/make_installer.py --source-dir dist/OpenWrench --output-dir dist
 ```
 
 The Linux archive extracts to `openwrench/`; `sh install.sh` installs into
 `~/.local` (or `$PREFIX`, e.g. `/usr/local` under `sudo`). The Windows installer
-defaults to a per-machine `Program Files` location but permits a per-user install.
-Neither uninstaller touches your workspace: the Windows uninstaller asks before
-deleting `%LOCALAPPDATA%\OpenWrench\OpenWrench` and defaults to keeping it.
+installs for the current user without elevation, normally under
+`%LOCALAPPDATA%\Programs\OpenWrench`. Interactive uninstall asks before deleting
+`%LOCALAPPDATA%\OpenWrench\OpenWrench` and defaults to keeping it; silent
+uninstall always keeps it. The installer has a matching `.exe.sha256` file.
+See [Windows installer testing](docs/WINDOWS_INSTALLER.md) for download, upgrade
+and acceptance instructions.
 Inno Setup is a Windows tool; `make_installer.py` exits with a clear message and
 non-zero status when `ISCC.exe` is unavailable rather than producing a partial artifact.
 
@@ -173,14 +179,17 @@ Schema 3 adds Repair Library records and FTS5. Existing workspaces receive a
 verified `*.pre-v3-*.sqlite3` snapshot before the transactional schema-3 migration.
 Opening a version-1 database first creates a uniquely named `*.pre-v2-*.sqlite3`
 backup beside it, then migrates transactionally. Existing settings survive.
+Schema 4 adds HTML manuals, schema 5 adds diagnostic sessions/samples/codes, and
+schema 6 adds saved guided runs. Each upgrade retains a pre-migration snapshot.
 Newer schemas cause a startup failure instead of a downgrade.
 
 Backups use SQLite's snapshot API and refuse to overwrite existing files.
-In Settings, **Restore database** accepts unmodified OpenWrench schema 1, 2, 3 or 4
+In Settings, **Restore database** accepts unmodified OpenWrench schema 1–6
 backups up to 1 GiB. Confirmation defaults to No. Restore validates schema,
 integrity, foreign keys and record values before saving a unique adjacent
 `*.pre-restore-*.sqlite3` safety backup. Replacement runs in one SQLite transaction;
-failure rolls back changes. The Garage and theme refresh immediately. Schema-1
+failure rolls back changes. Garage, Repair Library, Diagnostics and Settings
+refresh immediately. Stop diagnostic recording before restoring. Schema-1
 backups contain settings only, so restoring one replaces the Garage with an
 empty Garage. Schema-2 backups restore Garage records and an empty Repair Library.
 Newer, unrelated or modified schemas are rejected. Restore the
@@ -207,7 +216,8 @@ Viewing copies materialize on demand. The app retains cached copies after remova
 or restore rather than silently deleting files. Close the app before manually
 removing unneeded cached copies. A changed local copy triggers an error; move it
 aside to preserve it, then open the document again to recover its stored copy.
-Backing up/restoring a large SQLite file still runs synchronously in Settings.
+Settings backup/restore runs in a separate worker process. Other pages and
+Settings changes stay disabled during the operation to prevent concurrent writes.
 
 Replacing the application directory leaves
 user data intact. No automatic updater exists yet. Logs rotate at 500 KB with

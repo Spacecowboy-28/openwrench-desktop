@@ -163,33 +163,6 @@ class MainWindow(QMainWindow):
             return
         self.result.setText(f'Garage export saved: {filename}')
 
-    def choose_restore(self):
-        if self.library_page.busy:
-            QMessageBox.information(self, 'Document task active', 'Finish or cancel the document task before restoring.')
-            return
-        self.library_page.stop()
-        filename, _ = QFileDialog.getOpenFileName(self, 'Choose an OpenWrench backup', '', 'SQLite database (*.sqlite3 *.db);;All files (*)')
-        if not filename:
-            return
-        answer = QMessageBox.question(self, 'Replace this workspace?',
-            'Restore replaces all current vehicles, history, documents, schedules, bookmarks, settings, and VIN cache with this backup. '
-            'Schema-1 backups contain settings only; schema-2 backups contain Garage records without a Repair Library. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            safety = self.store.restore(Path(filename))
-        except (OSError, ValueError, sqlite3.Error) as error:
-            QMessageBox.critical(self, 'Restore failed', str(error))
-            return
-        self.garage.refresh()
-        self.library_page.refresh()
-        self.theme.blockSignals(True)
-        self.theme.setCurrentText(self.store.theme)
-        self.theme.blockSignals(False)
-        self.apply_theme(self.store.theme)
-        self.result.setText(f'Database restored. Previous workspace saved to: {safety}')
-
     def toggle_hardware(self, enabled: bool) -> None:
         try:
             self.store.set_hardware_enabled(enabled)
@@ -242,6 +215,9 @@ class MainWindow(QMainWindow):
             f'Backup saved: {filename}', 'Backup failed')
 
     def choose_restore(self):
+        if self.diagnostics_page.runner.active or self.diagnostics_page.session_id is not None:
+            QMessageBox.information(self, 'Diagnostic session active', 'Stop the diagnostic session before restoring.')
+            return
         if self.library_page.busy:
             QMessageBox.information(self, 'Document task active', 'Finish or cancel the document task before restoring.')
             return
@@ -273,6 +249,10 @@ class MainWindow(QMainWindow):
             if operation == 'restore':
                 self.garage.refresh()
                 self.library_page.refresh()
+                self.diagnostics_page.reset_after_restore()
+                self.hardware.blockSignals(True)
+                self.hardware.setChecked(self.store.hardware_enabled)
+                self.hardware.blockSignals(False)
                 self.theme.blockSignals(True)
                 self.theme.setCurrentText(self.store.theme)
                 self.theme.blockSignals(False)
@@ -284,8 +264,10 @@ class MainWindow(QMainWindow):
         self.storage_task.start()
 
     def storage_buttons_enabled(self, enabled):
-        self.backup_button.setEnabled(enabled)
-        self.restore_button.setEnabled(enabled)
+        # Keep other pages and Settings from starting writes during replacement.
+        for widget in (self.navigation, self.backup_button, self.restore_button,
+                       self.json_button, self.csv_button, self.theme, self.hardware):
+            widget.setEnabled(enabled)
 
     def check_database(self) -> None:
         try:

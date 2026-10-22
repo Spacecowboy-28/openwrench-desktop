@@ -28,7 +28,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libxkbcommon0 libdbus-1-3
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - run: python -m pytest -q --junitxml=artifacts/pytest.xml
       - run: python -m build
       - run: python scripts/build_desktop.py
       - name: Linux packaged launch
@@ -51,16 +51,47 @@ jobs:
       - name: Windows installer
         if: runner.os == 'Windows'
         run: |
-          choco install innosetup --no-progress -y
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           python scripts/make_installer.py --source-dir dist/OpenWrench --output-dir dist
+      - name: Check out previous development version for upgrade acceptance
+        if: runner.os == 'Windows'
+        uses: actions/checkout@v4
+        with:
+          ref: d6426b54cd3848b43ceae545807c8aa2e0bb9557
+          path: build/upgrade-source
+      - name: Build previous Windows development version
+        if: runner.os == 'Windows'
+        run: |
+          python build/upgrade-source/scripts/build_desktop.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/make_installer.py --source-dir build/upgrade-source/dist/OpenWrench --output-dir build/upgrade-installer --version 0.3.0.dev1
+      - name: Windows install, upgrade and uninstall acceptance
+        if: runner.os == 'Windows'
+        run: |
+          $installer = (Get-ChildItem dist/OpenWrench-*-setup.exe).FullName
+          $previous = (Get-ChildItem build/upgrade-installer/OpenWrench-*-setup.exe).FullName
+          python scripts/check_windows_installer.py $installer --previous-installer $previous
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: native-${{ runner.os }}
+          name: OpenWrench-development-${{ runner.os }}
           path: |
             dist/OpenWrench-*-setup.exe
+            dist/OpenWrench-*-setup.exe.sha256
             dist/OpenWrench-*-linux-*.tar.gz
-          if-no-files-found: ignore
+          if-no-files-found: error
+      - name: Upload validation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ runner.os }}
+          path: |
+            artifacts/pytest.xml
+            artifacts/installer-acceptance/
+          if-no-files-found: warn
       # Binary distribution is gated on the milestone-6 license/source audit,
       # native installation tests, signing decision, and user release approval.
       - uses: actions/upload-artifact@v4

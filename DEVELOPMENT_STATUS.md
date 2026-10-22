@@ -1,6 +1,9 @@
 # Development status
 
-Date: 2026-10-16. Version: 0.3.0.dev1. Branch: dev/milestone-4-openhands.
+Version: 0.3.0.dev2. Branch: dev/windows-installer-fixes.
+Based on the complete OpenHands revision `d6426b54cd3848b43ceae545807c8aa2e0bb9557`,
+which includes Milestones 3–6 and has 256 baseline tests. It is not based on the
+older Milestone 2 main checkout used during initial cloud onboarding.
 Main baseline: `04c9b881c9f73d84e2d5af2b80c740be967bfbc7`.
 Milestones 1 and 2 merged through PR #1 and PR #3. The user reported successful
 Windows acceptance of Milestone 2, including its export/restore follow-up.
@@ -82,7 +85,31 @@ An engineering audit of the Milestone 3 offline-HTML code found and fixed:
   `{root, issues}`; the GUI thread only walks the staged directory. Rendered pages
   are memoized in a bounded 32 MiB cache so Back/Forward/Home do not re-parse.
 
-## Validation and commits
+## Windows installer and restore follow-up
+
+- Fixed the Windows CI icon test: its original unconditional PNG assertion was
+  wrong on Windows. Both platform preferences and missing-preferred-icon fallback
+  now run explicitly on either host.
+- Schema-5 backup validation now constructs the diagnostic tables/indexes before
+  comparing schema signatures. Real schema-4/5 library backups round-trip without
+  changing the original, with safety backups and diagnostic values preserved.
+  Modified schema, invalid sessions and orphan samples remain rejected.
+- Integrated off-thread Milestone 3 restore with the later Diagnostics UI:
+  active recording blocks restore, other page/settings writes are disabled during
+  storage work, and restored hardware/diagnostic/guide selections refresh.
+- The versioned per-user Windows installer embeds the app icon, needs no
+  elevation, emits a SHA-256 file and preserves data during silent uninstall.
+- Windows CI builds the actual previous/current versions and exercises install,
+  upgrade, installed PDF/HTML/schema-5 recovery and uninstall with retained
+  synthetic workspace data. Artifacts upload after successful acceptance.
+  See `docs/WINDOWS_INSTALLER.md` for the development installer and test procedure.
+
+Local follow-up validation: 269 passed with no skips/failures, source distribution
+and wheel built, Linux native bundle/tarball built, and the actual bundled
+startup, PDF/HTML workers and schema-5 restore passed. Windows acceptance is
+run by the workflow; consult the exact branch run for its outcome.
+
+## Earlier validation and commits
 
 Earlier suite: 191 passed. Current suite: 221 passed under
 `QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore rejection,

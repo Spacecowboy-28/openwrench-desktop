@@ -205,4 +205,85 @@ def test_restore_active_or_missing_file_is_rejected(populated,tmp_path):
     before=read_tables(populated.connection)
     for path in [populated.path,tmp_path/'missing.sqlite3']:
         with pytest.raises(ValueError): populated.restore(path)
+
+
+def legacy_library_backup(tmp_path, version):
+    """A pre-guides workspace with Garage, embedded manuals and diagnostic data."""
+    from openwrench.diagnostics_schema import DIAGNOSTIC_TABLES
+    from openwrench.diagnostics_session import DiagnosticService
+    from openwrench.diagnostics_sim import SimulatorAdapter
+    from openwrench.library import Library
+    from test_library import details, synthetic_pdf
+    from test_html_library import synthetic_html
+
+    with closing(Store(tmp_path / 'legacy-workspace.sqlite3')) as legacy:
+        vehicle = seed(legacy, 'Legacy vehicle')
+        legacy.set_theme('light')
+        library = Library(legacy)
+        library.import_document(synthetic_pdf(tmp_path / 'manual.pdf'), details(), [vehicle])
+        library.import_document(synthetic_html(tmp_path / 'manual.zip'), details(), [vehicle])
+        if version == 5:
+            service = DiagnosticService(legacy)
+            session = service.start(vehicle, 'simulator', 'misfire')
+            simulator = SimulatorAdapter('misfire')
+            simulator.connect()
+            service.append(session, [simulator.read_pid(0x0C), simulator.read_pid(0x42)], 1, 0)
+            service.add_codes(session, simulator.codes(), '03')
+            service.finish(session)
+        expected = read_tables(legacy.connection)
+        with legacy.connection:
+            legacy.connection.execute('DROP TABLE diagnostic_guides')
+            if version == 4:
+                for table in reversed(DIAGNOSTIC_TABLES):
+                    legacy.connection.execute(f'DROP TABLE {table}')
+            legacy.connection.execute(f'PRAGMA user_version={version}')
+        backup = legacy.backup(tmp_path / 'legacy-backup.sqlite3')
+    return backup, expected
+
+
+@pytest.mark.parametrize('version', [4, 5])
+def test_legacy_library_restore_preserves_documents_diagnostics_and_source(populated, tmp_path, version):
+    from openwrench.library import Library
+    from openwrench.storage import SCHEMA_VERSION
+
+    source, expected = legacy_library_backup(tmp_path, version)
+    original = source.read_bytes()
+    before = read_tables(populated.connection)
+    safety = populated.restore(source)
+    assert source.read_bytes() == original
+    assert read_tables(populated.connection) == expected
+    assert populated.connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
+    assert Library(populated).search('brake')
+    assert Library(populated).search('caliper')
+    assert expected['diagnostic_guides'] == []
+    if version == 5:
+        assert expected['diagnostic_sessions'] and expected['diagnostic_samples'] and expected['diagnostic_codes']
+    with closing(Store(safety)) as previous:
+        assert read_tables(previous.connection) == before
+    with closing(Store(populated.path)) as reopened:
+        assert read_tables(reopened.connection) == expected
+    with closing(sqlite3.connect(source)) as untouched:
+        assert untouched.execute('PRAGMA user_version').fetchone()[0] == version
+
+
+@pytest.mark.parametrize('damage', ['trigger', 'missing-index', 'bad-session', 'orphan'])
+def test_malformed_schema5_restore_preserves_current_workspace(populated, tmp_path, damage):
+    source, _ = legacy_library_backup(tmp_path, 5)
+    with closing(sqlite3.connect(source)) as db:
+        if damage == 'trigger':
+            db.execute('CREATE TRIGGER untrusted AFTER INSERT ON settings BEGIN DELETE FROM vehicles; END')
+        elif damage == 'missing-index':
+            db.execute('DROP INDEX diagnostic_sessions_vehicle')
+        elif damage == 'bad-session':
+            db.execute("UPDATE diagnostic_sessions SET status='invented'")
+        else:
+            db.execute("UPDATE diagnostic_samples SET session_id='00000000-0000-0000-0000-000000000001'")
+        db.commit()
+    original = source.read_bytes()
+    before = read_tables(populated.connection)
+    with pytest.raises(ValueError):
+        populated.restore(source)
+    assert source.read_bytes() == original
+    assert read_tables(populated.connection) == before
+    assert not list(tmp_path.glob('current.pre-restore-*.sqlite3'))
     assert read_tables(populated.connection) == before

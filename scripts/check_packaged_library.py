@@ -9,6 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
 from test_library import synthetic_pdf,details
 from test_html_library import synthetic_html,synthetic_folder
+from test_transfers import legacy_library_backup
 from openwrench.storage import Store
 from openwrench.library import Library
 
@@ -60,7 +61,17 @@ def main():
         assert 'procedures/engine/head.htm' in library.html_files(newest)
         assert library.search('fictional clearance')[0]['id']==newest
         store.close()
-        print('Packaged PDF render and HTML ZIP and folder import, search, extraction and portable restore passed.')
+        legacy_dir=directory/'schema5';legacy_dir.mkdir()
+        legacy,expected=legacy_library_backup(legacy_dir,5)
+        original=legacy.read_bytes()
+        safety=worker(dict(operation='restore',source=str(legacy)))
+        assert Path(safety).is_file() and legacy.read_bytes()==original
+        from openwrench.transfers import read_tables
+        store=Store(database)
+        assert read_tables(store.connection)==expected
+        assert Library(store).search('caliper')
+        store.close()
+        print('Packaged PDF render, HTML ZIP/folder import, search, extraction, portable restore and schema-5 recovery passed.')
 
 
 if __name__=='__main__':main()

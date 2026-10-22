@@ -347,6 +347,29 @@ class DiagnosticsPage(QWidget):
         self.timer.start()
         self.status.setText('Session running in a worker thread.')
 
+    def reset_after_restore(self):
+        """Discard selections and unsaved guides belonging to the replaced data."""
+        self.session_id = self.last_session = self.run = None
+        self.live = {}
+        self.codes.clear()
+        self.detail.clear()
+        self.guide_runs.clear()
+        self.guide_save.setEnabled(False)
+        for label in (self.guide_node, self.guide_detail, self.guide_evidence,
+                      self.guide_history, self.guide_outcome):
+            label.clear()
+        self.guide_note.setVisible(False)
+        while self.guide_options.count():
+            item = self.guide_options.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for label in self.readout_labels.values():
+            if label is not None:
+                label.setText('—')
+        self.status.setText('Workspace restored. Select a session to review.')
+        self.refresh()
+        self.redraw()
+
     def _hardware_factory(self):
         from openwrench.diagnostics_hardware import ElmAdapter, SerialTransport, default_ports
         ports = default_ports()

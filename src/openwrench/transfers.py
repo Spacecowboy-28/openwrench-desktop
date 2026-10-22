@@ -252,6 +252,9 @@ def validated_backup(source, directory):
             if version in (4, 5, 6):
                 from openwrench.library_schema import create_html
                 create_html(expected_v1)
+            if version in (5, 6):
+                from openwrench.diagnostics_schema import create_diagnostics
+                create_diagnostics(expected_v1)
             expected = expected_v1 if version in (1, 2, 3, 4, 5) else reference.connection
             if schema_signature(incoming) != schema_signature(expected):
                 raise ValueError('This file does not match the supported OpenWrench schema.')

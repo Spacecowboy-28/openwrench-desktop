@@ -39,6 +39,9 @@ def main():
         '--add-data', f'{ASSETS}{os.pathsep}assets',
         '--icon', str(ASSETS / 'openwrench.ico'),
         '--version-file', str(version_file),
+        # Keep stdout for worker JSON and smoke tests while hiding a console owned
+        # by this GUI application. --windowed would set the worker's stdout to None.
+        *(['--hide-console', 'hide-early'] if sys.platform == 'win32' else []),
         '--exclude-module', 'PySide6.QtQml', '--exclude-module', 'PySide6.QtQuick',
         str(ROOT / 'scripts' / 'desktop_entry.py'),
     ], check=True, cwd=ROOT)

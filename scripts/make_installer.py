@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -23,7 +24,6 @@ ISS = ROOT / 'installer' / 'openwrench.iss'
 ISCC_CANDIDATES = (
     r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
     r'C:\Program Files\Inno Setup 6\ISCC.exe',
-    r'C:\Program Files (x86)\Inno Setup 5\ISCC.exe',
 )
 
 
@@ -31,7 +31,7 @@ def find_iscc(explicit=None):
     """Return a path to ISCC.exe, or None when it cannot be found."""
     if explicit:
         path = Path(explicit)
-        return path if path.exists() else None
+        return path if path.is_file() else None
     on_path = shutil.which('ISCC') or shutil.which('iscc')
     if on_path:
         return Path(on_path)
@@ -43,9 +43,11 @@ def find_iscc(explicit=None):
 
 def compile_installer(iscc, source_dir, output_dir, version, extra=()):
     """Run ISCC with the version/source defines. Returns the completed process."""
+    from write_version_info import numeric_version
     command = [
         str(iscc),
         f'/DAppVersion={version}',
+        '/DAppNumericVersion=' + '.'.join(map(str, numeric_version(version))),
         f'/DSourceDir={source_dir}',
         f'/DOutputDir={output_dir}',
         *extra,
@@ -83,13 +85,21 @@ def main(argv=None):
     # Inno writes relative to the .iss by default; make the output absolute so the
     # artifact lands in --output-dir regardless of the working directory.
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
-    result = compile_installer(iscc, source_dir, arguments.output_dir.resolve(), version)
+    try:
+        result = compile_installer(iscc, source_dir, arguments.output_dir.resolve(), version)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout or '', end='')
+        print(error.stderr or '', file=sys.stderr, end='')
+        return error.returncode
     if result.stdout:
         print(result.stdout)
     expected = arguments.output_dir / f'OpenWrench-{version}-setup.exe'
     if not expected.exists():
         print(f'ISCC succeeded but {expected} is missing.', file=sys.stderr)
         return 4
+    with expected.open('rb') as stream:
+        checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+    expected.with_suffix('.exe.sha256').write_text(f'{checksum}  {expected.name}\n', encoding='utf-8')
     print(f'Installer: {expected}')
     return 0
 

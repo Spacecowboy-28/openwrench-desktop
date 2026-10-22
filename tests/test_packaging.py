@@ -40,8 +40,10 @@ def test_version_resource_is_well_formed_and_names_the_product():
     assert 'VSVersionInfo(' in text
     assert f"StringStruct('ProductVersion', '{package_version()}')" in text
     # Windows requires exactly four integers per version field.
-    assert text.count('filevers=(0, 3, 0, 1,)') == 1
-    assert text.count('prodvers=(0, 3, 0, 1,)') == 1
+    from write_version_info import numeric_version
+    numeric = ', '.join(map(str, numeric_version()))
+    assert text.count(f'filevers=({numeric},)') == 1
+    assert text.count(f'prodvers=({numeric},)') == 1
 
 
 def test_icon_build_is_deterministic_and_writes_a_multi_size_ico(tmp_path):
@@ -72,7 +74,8 @@ def test_icon_build_is_deterministic_and_writes_a_multi_size_ico(tmp_path):
     assert not QIcon(str(ico)).isNull()
 
 
-def test_resource_lookup_prefers_windows_ico_and_falls_back(tmp_path, monkeypatch):
+@pytest.mark.parametrize('platform,preferred', [('linux', 'png'), ('win32', 'ico')])
+def test_resource_lookup_prefers_windows_ico_and_falls_back(tmp_path, monkeypatch, platform, preferred):
     import importlib
     from PySide6.QtGui import QGuiApplication
     QGuiApplication.instance() or QGuiApplication([sys.argv[0]])
@@ -84,10 +87,14 @@ def test_resource_lookup_prefers_windows_ico_and_falls_back(tmp_path, monkeypatc
 
     # Simulate a frozen build: PyInstaller points _MEIPASS at the bundle root.
     monkeypatch.setattr(sys, '_MEIPASS', str(bundle), raising=False)
+    monkeypatch.setattr(sys, 'platform', platform)
     assert resources.resource_root() == bundle
-    assert resources.icon_path() == bundle / 'assets' / 'openwrench.png'
-    monkeypatch.setattr(sys, 'platform', 'win32')
-    assert resources.icon_path() == bundle / 'assets' / 'openwrench.ico'
+    assert resources.icon_path() == bundle / 'assets' / f'openwrench.{preferred}'
+    assert not resources.application_icon().isNull()
+
+    (bundle / 'assets' / f'openwrench.{preferred}').unlink()
+    fallback = 'png' if preferred == 'ico' else 'ico'
+    assert resources.icon_path() == bundle / 'assets' / f'openwrench.{fallback}'
     assert not resources.application_icon().isNull()
 
     # In a source checkout no icon is committed, so lookup must return None rather
@@ -134,6 +141,10 @@ def test_installer_script_preserves_user_data_and_installs_shortcuts():
     # The version and source paths must be injected, never hard-coded.
     assert 'AppVersion={#AppVersion}' in text
     assert '#define AppVersion "0.0.0"' in text
+    assert 'PrivilegesRequired=lowest' in text
+    assert 'not UninstallSilent' in text
+    assert 'VersionInfoVersion={#AppNumericVersion}' in text
+    assert 'SetupIconFile={#SourceDir}\\_internal\\assets\\openwrench.ico' in text
 
 
 def test_linux_package_layout_is_relocatable(tmp_path):
@@ -172,3 +183,46 @@ def test_installer_builder_refuses_without_a_bundle(tmp_path):
     from make_linux_package import main as linux_main
     # A missing bundle must fail with a clear status, not traceback or a silent pass.
     assert linux_main(['--bundle-dir', str(tmp_path / 'nope'), '--output-dir', str(tmp_path / 'out')]) == 2
+
+
+def test_windows_installer_builder_checks_inputs(tmp_path, monkeypatch):
+    import make_installer
+    assert make_installer.main(['--source-dir', str(tmp_path)]) == 2
+    (tmp_path / 'OpenWrench.exe').write_bytes(b'bundle fixture')
+    monkeypatch.setattr(make_installer, 'find_iscc', lambda _: None)
+    assert make_installer.main(['--source-dir', str(tmp_path)]) == 3
+
+
+@pytest.mark.parametrize('outcome', ['success', 'compiler-error', 'missing-output'])
+def test_windows_installer_compilation_reports_failures_and_checksums(tmp_path, monkeypatch, capsys, outcome):
+    import hashlib
+    import subprocess
+    import make_installer
+    source = tmp_path / 'bundle with spaces'
+    source.mkdir()
+    (source / 'OpenWrench.exe').write_bytes(b'bundle fixture')
+    output = tmp_path / 'installer output'
+    compiler = tmp_path / 'ISCC.exe'
+    monkeypatch.setattr(make_installer, 'find_iscc', lambda _: compiler)
+
+    def compile_command(command, **kwargs):
+        assert command[0] == str(compiler)
+        assert '/DAppVersion=1.2.3.dev4' in command
+        assert '/DAppNumericVersion=1.2.3.4' in command
+        assert f'/DSourceDir={source}' in command
+        assert f'/DOutputDir={output}' in command
+        if outcome == 'compiler-error':
+            raise subprocess.CalledProcessError(1, command, output='compiler detail', stderr='bad input')
+        if outcome == 'success':
+            (output / 'OpenWrench-1.2.3.dev4-setup.exe').write_bytes(b'installer fixture')
+        return subprocess.CompletedProcess(command, 0, stdout='compiled', stderr='')
+
+    monkeypatch.setattr(make_installer.subprocess, 'run', compile_command)
+    result = make_installer.main(['--source-dir', str(source), '--output-dir', str(output), '--version', '1.2.3.dev4'])
+    assert result == {'success': 0, 'compiler-error': 1, 'missing-output': 4}[outcome]
+    if outcome == 'success':
+        checksum = (output / 'OpenWrench-1.2.3.dev4-setup.exe.sha256').read_text('utf-8')
+        assert checksum == hashlib.sha256(b'installer fixture').hexdigest() + '  OpenWrench-1.2.3.dev4-setup.exe\n'
+    elif outcome == 'compiler-error':
+        captured = capsys.readouterr()
+        assert 'compiler detail' in captured.out and 'bad input' in captured.err
