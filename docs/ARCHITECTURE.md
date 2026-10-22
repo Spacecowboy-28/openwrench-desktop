@@ -72,11 +72,37 @@ combination before integrating it or changing the overall distribution license.
 ## Packaging and upgrade policy
 
 Development builds use onedir bundles for inspectability and replacement of
-shared libraries. No auto-update endpoint, code signing key, release upload, or
-installer exists in milestone 1. CI builds on Windows and Linux separately.
+shared libraries. No auto-update endpoint, code signing key, or release upload
+exists yet. CI builds on Windows and Linux separately.
 Milestone 6 adds a Windows installer, install/upgrade/uninstall validation,
 runtime attribution/source inventory, signing decision, and an approved release.
 macOS needs a native build runner and testing before claiming support.
+
+### Packaging layout (milestone 6)
+
+Packaging is code, not checked-in blobs, so no binary can drift from its source:
+
+- `scripts/make_icon.py` renders `openwrench.png` and a six-size `openwrench.ico`
+  from Qt. The first render at each size warms Qt's glyph cache and is discarded,
+  so output is byte-reproducible across processes. Qt's own ICO writer emits a
+  single image; `_write_ico` composes the multi-size PNG-entry ICO that Windows
+  shell and taskbar require.
+- `scripts/write_version_info.py` derives the Windows VS_VERSIONINFO resource and
+  every version string from `openwrench.__version__`, and `--check` fails when it
+  disagrees with `pyproject.toml`.
+- `src/openwrench/resources.py` is the only module that knows the frozen
+  (`sys._MEIPASS`) and source layouts, so callers never guess a resource path.
+- `scripts/build_desktop.py` renders icons and the version resource, then freezes
+  with PyInstaller (onedir, `collect_all` for pypdfium2) and bundles `assets/`.
+- `installer/openwrench.iss` is a static Inno Setup 6 script; the build script
+  injects the version and source directory as `/D` defines.
+- `scripts/make_installer.py` and `scripts/make_linux_package.py` assemble the
+  Windows installer and the relocatable Linux tarball.
+
+Data preservation is a packaging invariant, not an installer option: the workspace
+lives under Qt's `AppLocalDataLocation`, never the install directory. The Windows
+uninstaller deletes program files only and asks before removing the workspace,
+defaulting to No. The Linux `install.sh` writes solely under `$PREFIX`.
 
 Data lives outside the installation directory. Database migrations run before
 window construction. Reject newer schema versions. Before future destructive

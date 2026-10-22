@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=OpenWrench
+GenericName=Automotive Workshop
+Comment=Offline automotive workshop desktop
+Exec=openwrench
+Icon=openwrench
+Terminal=false
+Categories=Utility;Engineering;
+Keywords=automotive;obd;repair;garage;workshop;
+StartupNotify=true
+StartupWMClass=OpenWrench

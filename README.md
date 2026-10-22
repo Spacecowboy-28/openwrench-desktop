@@ -123,8 +123,31 @@ The native development bundle appears in `dist/OpenWrench`. On Windows, run
 `OpenWrench.exe` from this directory. On Linux, run `./OpenWrench`.
 Keep the entire directory together. PyInstaller includes the Python runtime
 and Qt, so this bundled application does not require a separate Python install.
-Build on the target operating system. This is a portable development bundle,
-not a tested installer or public release. The Windows build has not run locally.
+Build on the target operating system. The Windows build has not run locally.
+
+`build_desktop.py` also renders the application icon into `build/assets` and writes
+the Windows version resource from `openwrench.__version__`. It fails if that version
+disagrees with `pyproject.toml`, so a release bump cannot leave stale metadata.
+Icons are generated, not committed: `scripts/make_icon.py` renders the PNG and a
+multi-size ICO deterministically from Qt.
+
+Package the bundle for distribution:
+
+```sh
+# Linux: relocatable tarball with a desktop entry and hicolor icons.
+python scripts/make_linux_package.py --bundle-dir dist/OpenWrench --output-dir dist
+
+# Windows: signed-ready Inno Setup installer (requires Inno Setup 6 / ISCC.exe).
+python scripts/make_installer.py --source-dir dist/OpenWrench --output-dir dist
+```
+
+The Linux archive extracts to `openwrench/`; `sh install.sh` installs into
+`~/.local` (or `$PREFIX`, e.g. `/usr/local` under `sudo`). The Windows installer
+defaults to a per-machine `Program Files` location but permits a per-user install.
+Neither uninstaller touches your workspace: the Windows uninstaller asks before
+deleting `%LOCALAPPDATA%\OpenWrench\OpenWrench` and defaults to keeping it.
+Inno Setup is a Windows tool; `make_installer.py` exits with a clear message and
+non-zero status when `ISCC.exe` is unavailable rather than producing a partial artifact.
 
 Smoke-test an isolated workspace:
 
@@ -189,13 +212,16 @@ Backing up/restoring a large SQLite file still runs synchronously in Settings.
 Replacing the application directory leaves
 user data intact. No automatic updater exists yet. Logs rotate at 500 KB with
 two retained copies. They record application lifecycle events, not VINs or scans.
-No installer or uninstaller currently runs.
+The Windows uninstaller removes program files only; it prompts before deleting
+your workspace and defaults to keeping it. The Linux `install.sh` writes only
+under `$PREFIX` and never removes user data.
 
 ## Project map
 
 - `src/openwrench`: native UI, storage, lifecycle, provider and adapter contracts
-- `tests`: persistence, backup failures, real Qt interaction, and launch tests
-- `scripts`: same-platform desktop packaging
+- `tests`: persistence, backup failures, real Qt interaction, launch and packaging tests
+- `scripts`: icon/version generation, same-platform desktop packaging and installers
+- `installer`: Inno Setup script and Linux desktop entry
 - `examples`: four development profiles with unknown fields left null
 - `schemas`: data-contribution design boundary for milestone 3
 - `docs/ARCHITECTURE.md`: stack decision and component boundaries

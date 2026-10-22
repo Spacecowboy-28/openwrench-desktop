@@ -32,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName('OpenWrench')
     app.setApplicationVersion(__version__)
     app.setStyle('Fusion')
+    from openwrench.resources import application_icon
+    icon = application_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     location = args.data_dir or Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
     store = None
     handler = None

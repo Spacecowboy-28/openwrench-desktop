@@ -2,6 +2,7 @@ include LICENSE README.md THIRD_PARTY.md CONTRIBUTING.md SECURITY.md ROADMAP.md 
 recursive-include docs *.md *.json
 recursive-include tests *.py
 recursive-include scripts *.py
+recursive-include installer *.iss *.desktop
 recursive-include examples *.json
 recursive-include schemas *.md *.json
 include .github/workflows/ci.yml
