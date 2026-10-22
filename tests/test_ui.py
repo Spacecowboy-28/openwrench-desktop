@@ -1,8 +1,20 @@
+import time
+
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
 from openwrench.storage import Store
 from openwrench.ui import MainWindow
+
+
+def wait_for_task(app,window,timeout=30):
+    deadline=time.monotonic()+timeout
+    while time.monotonic()<deadline:
+        app.processEvents()
+        task=getattr(window,'storage_task',None)
+        if task is not None and task.done:return
+        QTest.qWait(10)
+    assert getattr(window,'storage_task',None) and window.storage_task.done,'Timed out waiting for storage worker'
 
 
 def test_window_navigation_theme_and_restart(app, tmp_path):
@@ -35,6 +47,7 @@ def test_backup_button_creates_openable_database(app, tmp_path, monkeypatch):
     target = tmp_path / 'backup.sqlite3'
     monkeypatch.setattr('openwrench.ui.QFileDialog.getSaveFileName', lambda *a: (str(target), ''))
     QTest.mouseClick(window.backup_button, Qt.MouseButton.LeftButton)
+    wait_for_task(app,window)
     assert target.exists()
     backup = Store(target)
     assert backup.theme == store.theme
@@ -63,6 +76,7 @@ def test_existing_backup_surfaces_error_without_overwrite(app, tmp_path, monkeyp
     monkeypatch.setattr('openwrench.ui.QFileDialog.getSaveFileName', lambda *a: (str(target), ''))
     monkeypatch.setattr('openwrench.ui.QMessageBox.critical', lambda *a: errors.append(a))
     window.choose_backup()
+    wait_for_task(app,window)
     assert errors
     assert target.read_text() == 'existing backup'
     window.close()

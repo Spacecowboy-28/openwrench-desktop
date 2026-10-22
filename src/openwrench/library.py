@@ -10,6 +10,7 @@ import tempfile
 from uuid import uuid4
 
 from openwrench.garage import Garage, text, integer
+from openwrench.html_bundle import _is_link
 from openwrench.library_schema import CATEGORIES
 from openwrench.providers import MATCH_FIELDS, safe_url
 
@@ -143,14 +144,17 @@ class Library:
         return identifier
 
     def import_html(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False):
-        from openwrench.html_bundle import import_source, read_bundle_folder, pack, index
+        from openwrench.html_bundle import import_source, read_bundle_folder, describe_bundle, pack, index, _is_link
         values = metadata(data)
         for vehicle in vehicles: Garage(self.store).vehicle(vehicle)
         # A folder import reuses the same bundle pipeline; only the reader differs.
-        if Path(source).is_dir() and not Path(source).is_symlink():
+        if Path(source).is_dir() and not _is_link(source):
             files, report = read_bundle_folder(source, cancelled, progress)
         else:
-            files, report = import_source(source, cancelled), None
+            files, report = import_source(source, cancelled)
+            # describe_bundle() parses the pages once to detect the entry page and
+            # note dropped active content; it runs in the worker, never on the GUI.
+            report = describe_bundle(files, report)
         progress(1,3)
         content, sections = pack(files), index(files)
         digest = hashlib.sha256(content).hexdigest()
@@ -182,7 +186,7 @@ class Library:
         row = self.db.execute('SELECT content FROM document_files WHERE document_id=?',(identifier,)).fetchone()
         if doc['format'] != 'html' or not row or hashlib.sha256(row[0]).hexdigest() != doc['sha256']:
             raise ValueError('Missing or damaged HTML bundle.')
-        return read_zip(row[0])
+        return read_zip(row[0])[0]
 
     def html_sections(self, identifier):
         return [dict(r) for r in self.db.execute('SELECT * FROM html_sections WHERE document_id=? ORDER BY page',(identifier,))]
@@ -193,14 +197,14 @@ class Library:
         import shutil
         files = self.html_files(identifier)
         root = self.directory
-        if root.is_symlink(): raise ValueError('Document directory is a symbolic link.')
+        if _is_link(root): raise ValueError('Document directory is a symbolic link or junction.')
         root.mkdir(parents=True,exist_ok=True)
         destination = root / (self.document(identifier)['sha256']+'.html-bundle')
-        if destination.is_symlink(): raise ValueError('Bundle directory is a symbolic link.')
+        if _is_link(destination): raise ValueError('Bundle directory is a symbolic link or junction.')
         if destination.exists():
             actual = set()
             for path in destination.rglob('*'):
-                if path.is_symlink(): raise ValueError('Cached bundle contains a symbolic link.')
+                if _is_link(path): raise ValueError('Cached bundle contains a symbolic link or junction.')
                 if path.is_file():
                     name = path.relative_to(destination).as_posix()
                     if name not in files or path.stat().st_size != len(files[name]) or path.read_bytes() != files[name]:
@@ -255,12 +259,12 @@ class Library:
         if not re.fullmatch('[0-9a-f]{64}', digest):
             raise ValueError('Invalid document identity.')
         root = self.directory
-        if root.is_symlink():
-            raise ValueError('The document directory must not be a symbolic link.')
+        if _is_link(root):
+            raise ValueError('The document directory must not be a symbolic link or junction.')
         root.mkdir(parents=True, exist_ok=True)
         path = root / (digest + '.pdf')
-        if path.is_symlink():
-            raise ValueError('The document file must not be a symbolic link.')
+        if _is_link(path):
+            raise ValueError('The document file must not be a symbolic link or junction.')
         if path.exists():
             if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                 raise ValueError('Local PDF changed. Move it aside, then recover the stored copy.')
@@ -358,7 +362,7 @@ def validate_library_records(data, include_content=True):
             raise ValueError('Missing or damaged document content.')
         if doc['format']=='html':
             from openwrench.html_bundle import read_zip, index
-            sections = index(read_zip(value))
+            sections = index(read_zip(value)[0])
             actual = [dict(path=r['path'],anchor=r['anchor'],page=r['page']) for r in data['html_sections'] if r['document_id']==doc['id']]
             expected = [dict(path=r['path'],anchor=r['anchor'],page=n) for n,r in enumerate(sections,1)]
             if sorted(actual,key=lambda r:r['page']) != expected or len(sections)!=doc['page_count']:

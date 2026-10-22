@@ -66,15 +66,15 @@ def test_high_ratio_manual_is_accepted_and_repackable(tmp_path):
     with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:z.writestr('index.html',page)
     raw=output.getvalue()
     assert len(page)/len(raw) > 200
-    assert read_zip(raw)['index.html']==page
+    assert read_zip(raw)[0]['index.html']==page
     folder=tmp_path/'manual';folder.mkdir()
     (folder/'index.html').write_bytes(page)
-    files=import_source(folder/'index.html')
-    assert pack(files)==pack(read_zip(pack(files)))
+    files=import_source(folder/'index.html')[0]
+    assert pack(files)==pack(read_zip(pack(files))[0])
 
 
 def test_links_report_and_sections(tmp_path):
-    files=read_zip(synthetic_html(tmp_path/'manual.zip').read_bytes())
+    files=read_zip(synthetic_html(tmp_path/'manual.zip').read_bytes())[0]
     assert resolve('procedures/brake.htm','../index.html')==('index.html','')
     for link in ('../../outside','file:///etc/passwd','https://example.org','//example.org/a','%2fetc/passwd','%2e%2e/%2e%2e/x'):
         with pytest.raises(ValueError):resolve('procedures/brake.htm',link)
@@ -134,7 +134,7 @@ def test_standalone_html_collects_reachable_only(tmp_path):
     (root/'index.htm').write_text('<a href="page.html">Next</a><img src="missing.png"><a href="../private.txt">Outside</a>')
     (root/'page.html').write_text('<p>Linked original page</p>')
     (root/'unrelated.txt').write_text('Private record')
-    files=import_source(root/'index.htm')
+    files=import_source(root/'index.htm')[0]
     assert set(files)=={'index.htm','page.html'}
     assert len(inspect(files))==2
 
@@ -154,7 +154,7 @@ def test_static_renderer_blocks_active_content_and_local_files(app,tmp_path):
 
 
 def test_svg_original_diagram_and_active_svg(app,tmp_path):
-    files=read_zip(synthetic_html(tmp_path/'manual.zip').read_bytes())
+    files=read_zip(synthetic_html(tmp_path/'manual.zip').read_bytes())[0]
     browser=OfflineBrowser(files)
     image=browser.loadResource(QTextDocument.ResourceType.ImageResource,QUrl('bundle:/assets/diagram.svg'))
     assert isinstance(image,QImage) and image.width()==60
@@ -241,7 +241,7 @@ def test_read_bundle_dir_matches_read_zip_and_rejects_symlinks(tmp_path):
     root=tmp_path/'bundle';root.mkdir()
     for name,content in files.items():
         path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(content)
-    assert read_bundle_dir(root)==read_zip(pack(files))
+    assert read_bundle_dir(root)==read_zip(pack(files))[0]
     outside=tmp_path/'secret.html';outside.write_bytes(b'<p>private</p>')
     try:(root/'linked.html').symlink_to(outside)
     except OSError:pytest.skip('OS denies creating symlinks for this user')
@@ -313,9 +313,121 @@ def test_stored_archive_limit_allows_repacking(monkeypatch):
     with pytest.raises(ValueError,match='stored-size'):read_zip(content)
 
 
+def _zip_with(entries):
+    output=BytesIO()
+    with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as z:
+        for name,data in entries:z.writestr(name,data)
+    return output.getvalue()
+
+
+def test_zip_import_skips_and_reports_ordinary_unsupported_files():
+    """A manual that ships Thumbs.db/desktop.ini/.DS_Store/RTF/extensionless files
+    must import; those files are reported, not treated as fatal."""
+    raw=_zip_with([('index.html',b'<h1>Manual</h1>'),('assets/style.css',b'h1{color:red}'),
+                   ('Thumbs.db',b'\xd0\xcf\x11\xe0'),('desktop.ini',b'[.ShellClassInfo]'),
+                   ('.DS_Store',b'\x00\x00\x00\x01Bud1'),('assets/readme',b'notes'),
+                   ('assets/notes.rtf',b'{\\rtf1}')])
+    files,report=read_zip(raw)
+    assert set(files)=={'index.html','assets/style.css'}
+    assert report['unsupported']==['.DS_Store','Thumbs.db','assets/notes.rtf','assets/readme','desktop.ini']
+    assert report['inactive']==[]
+    # The same junk must not change entry-page detection.
+    assert entry_page(files)==('index.html','')
+
+
+def test_zip_import_still_rejects_unsafe_and_malicious_entries():
+    """Skipping unsupported files must not weaken any safety rule."""
+    import stat as _stat
+    # A traversal path, an absolute path and a Windows device name are still fatal.
+    for name in ('../escape.html','/etc/x.html','CON.html','a/../b.html'):
+        with pytest.raises(ValueError,match='Unsafe'):read_zip(_zip_with([('index.html',b'<p>x</p>'),(name,b'y')]))
+    # A symlink member, a case alias and a duplicate remain fatal even when the
+    # archive also carries ordinary unsupported files.
+    output=BytesIO()
+    with zipfile.ZipFile(output,'w') as z:
+        z.writestr('index.html',b'<p>x</p>');z.writestr('Thumbs.db',b'\xd0\xcf')
+        info=zipfile.ZipInfo('link.html');info.create_system=3;info.external_attr=(_stat.S_IFLNK|0o777)<<16
+        z.writestr(info,b'/etc/passwd')
+    with pytest.raises(ValueError,match='unsafe archive entry'):read_zip(output.getvalue())
+    with pytest.raises(ValueError,match='Case-ambiguous'):read_zip(_zip_with([('index.html',b'<p>x</p>'),('INDEX.HTML',b'y')]))
+    with pytest.raises(ValueError,match='no HTML'):read_zip(_zip_with([('Thumbs.db',b'\xd0\xcf')]))
+
+
+def test_macos_metadata_is_ignored_not_imported(tmp_path):
+    """__MACOSX sidecars and AppleDouble `._*` forks are not manual content, so
+    they cannot masquerade as a second index.html."""
+    raw=_zip_with([('index.html',b'<h1>Real manual</h1>'),
+                   ('__MACOSX/index.html',b'<h1>junk</h1>'),
+                   ('__MACOSX/._index.html',b'\x00\x05\x16\x07'),
+                   ('procedures/._brake.htm',b'\x00\x05\x16\x07')])
+    files,report=read_zip(raw)
+    assert set(files)=={'index.html'}
+    assert report['metadata']==['__MACOSX/._index.html','__MACOSX/index.html','procedures/._brake.htm']
+    # No misleading "Multiple index.html" note.
+    assert entry_page(files)==('index.html','')
+    # The folder path behaves the same way.
+    folder=_folder_with(tmp_path/'zipcase',{'index.html':b'<h1>Real manual</h1>','__MACOSX/index.html':b'<h1>junk</h1>'})
+    files,report=read_bundle_folder(folder)
+    assert set(files)=={'index.html'} and report['entry']=='index.html'
+    assert report['metadata']==['__MACOSX/index.html']
+    assert any('macOS metadata' in note for note in report['notes'])
+
+
+def _folder_with(root,entries):
+    for name,data in entries.items():
+        path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
+    return root
+
+
+def test_zip_and_folder_imports_produce_the_same_report_shape(tmp_path):
+    """A ZIP and the equivalent folder must tell the user the same things, so the
+    import dialog is truthful whichever way the manual arrives."""
+    from openwrench.html_bundle import describe_bundle
+    entries={'index.html':b'<h1>Manual</h1><script>boot()</script>','assets/style.css':b'h1{color:red}',
+             'Thumbs.db':b'\xd0\xcf\x11\xe0','notes.rtf':b'{\\rtf1}'}
+    zip_files,zip_report=read_zip(_zip_with(list(entries.items())))
+    zip_report=describe_bundle(zip_files,zip_report)
+    folder=_folder_with(tmp_path/'manual',entries)
+    folder_files,folder_report=read_bundle_folder(folder)
+    for report in (zip_report,folder_report):
+        assert report['entry']=='index.html'
+        assert report['unsupported']==['Thumbs.db','notes.rtf']
+        assert any('JavaScript' in note for note in report['notes'])
+        assert any('cannot open' in note for note in report['notes'])
+    assert set(zip_files)==set(folder_files)
+
+
+def test_directory_redirection_is_never_followed(tmp_path):
+    """A symlink or Windows junction inside (or as) the selected folder must not
+    let the walk escape the chosen root, and must be reported as skipped."""
+    from openwrench.html_bundle import _is_link
+    root=tmp_path/'manual';root.mkdir()
+    (root/'index.html').write_bytes(b'<a href="redirect/secret.html">x</a>')
+    outside=tmp_path/'outside';outside.mkdir();(outside/'secret.html').write_bytes(b'<h1>SECRET</h1>')
+    link=root/'redirect'
+    try:link.symlink_to(outside,target_is_directory=True)
+    except OSError:pytest.skip('OS denies creating directory symlinks for this user')
+    assert _is_link(link)
+    files,report=read_bundle_folder(root)
+    assert 'redirect/secret.html' not in files and 'SECRET' not in b''.join(files.values()).decode('utf-8','replace')
+    assert any(row['path']=='redirect' for row in report['skipped'])
+    # Selecting the redirect itself as the source folder is refused.
+    with pytest.raises(ValueError,match='not a symbolic link or junction'):read_bundle_folder(link)
+
+
+def test_is_link_detects_junctions_and_is_python_311_safe(tmp_path,monkeypatch):
+    """_is_link must fall back safely when os.path.isjunction is absent (3.11)."""
+    from openwrench import html_bundle
+    plain=_folder_with(tmp_path/'plain',{'index.html':b'<p>x</p>'})
+    assert html_bundle._is_link(plain/'index.html') is False
+    import os as _os
+    monkeypatch.delattr(_os.path,'isjunction',raising=False)
+    assert html_bundle._is_link(plain) is False
+
+
 def test_unclosed_drop_tags_are_reported(tmp_path):
     files=read_zip(pack({'index.html':b'<p>Before</p><script>var x=1;<p>After</p>',
-                         'clean.html':b'<p>fine</p>'}))
+                         'clean.html':b'<p>fine</p>'}))[0]
     assert StaticHTML('index.html',files).unclosed=='script'
     assert StaticHTML('clean.html',files).unclosed is None
     reasons=[i['reason'] for i in inspect(files) if i['page']=='index.html']
@@ -326,7 +438,7 @@ def test_unclosed_drop_tags_are_reported(tmp_path):
 def test_inspect_marks_a_truncated_report(monkeypatch):
     from openwrench import html_bundle
     monkeypatch.setattr(html_bundle,'MAX_ISSUES',3)
-    files=read_zip(pack({'index.html':b'<img src="a.png"><img src="b.png"><img src="c.png"><img src="d.png">'}))
+    files=read_zip(pack({'index.html':b'<img src="a.png"><img src="b.png"><img src="c.png"><img src="d.png">'}))[0]
     issues=inspect(files)
     assert issues[-1]['reason']==html_bundle.TRUNCATED
     assert sum(1 for i in issues if i['reason']!=html_bundle.TRUNCATED)==3

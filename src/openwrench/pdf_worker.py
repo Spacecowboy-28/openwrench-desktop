@@ -38,6 +38,15 @@ def main(arguments):
                 issues = inspect(files)
                 print(json.dumps(dict(bundle=dict(root=str(root),files=list(files)))),flush=True)
                 result = dict(root=str(root),issues=issues)
+            elif operation == 'backup':
+                # Copying a large workspace can take seconds; the GUI thread must
+                # not block. SQLite's backup API produces a coherent snapshot.
+                result = str(store.backup(Path(job['destination'])))
+            elif operation == 'restore':
+                # Restore validates, writes a safety backup and rebuilds FTS inside
+                # one transaction. Running it here keeps the window responsive while
+                # SQLite's rollback still guarantees integrity on failure.
+                result = str(store.restore(Path(job['source'])))
             else:
                 raise ValueError('Unknown document operation.')
         print(json.dumps(dict(result=result)),flush=True)

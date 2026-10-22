@@ -1,5 +1,6 @@
 from contextlib import closing
 import json
+import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
@@ -8,6 +9,16 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from openwrench.garage import Garage
 from openwrench.storage import Store
 from openwrench.ui import MainWindow
+
+
+def wait_for_task(app,window,timeout=30):
+    deadline=time.monotonic()+timeout
+    while time.monotonic()<deadline:
+        app.processEvents()
+        task=getattr(window,'storage_task',None)
+        if task is not None and task.done:return
+        QTest.qWait(10)
+    assert getattr(window,'storage_task',None) and window.storage_task.done,'Timed out waiting for storage worker'
 
 
 def add(store,name):
@@ -32,6 +43,7 @@ def test_settings_exports_and_restore_refresh_same_window(app,tmp_path,monkeypat
         monkeypatch.setattr(QFileDialog,'getOpenFileName',lambda *a:(str(source),''))
         monkeypatch.setattr(QMessageBox,'question',lambda *a:QMessageBox.StandardButton.Yes)
         QTest.mouseClick(window.restore_button,Qt.MouseButton.LeftButton)
+        wait_for_task(app,window)
         assert window.garage.table.item(0,0).text() == 'Restored'
         assert window.theme.currentText() == 'light'
         window.theme.setCurrentText('dark')
@@ -58,6 +70,7 @@ def test_restore_cancel_and_rejected_input_preserve_ui(app,tmp_path,monkeypatch)
         monkeypatch.setattr(QMessageBox,'question',lambda *a:QMessageBox.StandardButton.Yes)
         monkeypatch.setattr(QMessageBox,'critical',lambda *a:errors.append(a))
         window.choose_restore()
+        wait_for_task(app,window)
         assert errors and window.garage.table.item(0,0).text() == 'Current'
         monkeypatch.setattr(QFileDialog,'getOpenFileName',lambda *a:('',''))
         window.choose_restore()

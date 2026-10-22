@@ -104,6 +104,9 @@ through the original Store connection. Existing Garage objects keep their valid
 connection. A verified safety backup precedes replacement; concurrent commits
 from another connection cause cancellation. Strict schema matching rejects extra
 triggers, views and tables. No imported schema executes against the live workspace.
+Backup and restore run in the worker process (`pdf_worker.py` `backup`/`restore`
+operations) so copying a large workspace never blocks the GUI thread; the worker
+owns its own `Store` connection and the restore transaction still rolls back whole.
 
 ## Milestone 3 extension
 
@@ -157,6 +160,15 @@ No data from a model response substitutes for manufacturer technical information
 `html_bundle.py` validates bounded ZIP entries, walks a selected manual folder,
 and resolves reachable local HTML resources; it canonicalizes bundles, indexes
 stable file/anchor sections and audits references.
+
+ZIP import (`read_zip`) skips and reports ordinary files the viewer cannot use
+(`Thumbs.db`, `desktop.ini`, `.DS_Store`, RTF, extensionless resources) and treats
+macOS `__MACOSX/` and AppleDouble `._*` entries as metadata, so they cannot fake a
+second entry page. Every safety rule stays fatal: unsafe or normalized paths,
+symlinks/reparse points, encrypted or duplicated entries, case aliases, non-regular
+entries and the size budgets. `describe_bundle` is shared by ZIP, folder and
+single-page imports so all three report the same entry page, dropped active
+content and omitted files.
 
 Folder import (`read_bundle_folder`) is the whole-tree counterpart to ZIP import.
 It walks with `os.scandir` in the worker, never following a symlink or Windows

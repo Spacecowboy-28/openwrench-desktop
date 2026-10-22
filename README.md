@@ -236,6 +236,14 @@ files and anchors, external URLs, files that were stored but not displayed
 skipped for safety. A folder with no HTML pages is rejected with a clear message
 rather than importing nothing.
 
+ZIP import applies the same rule: ordinary files a manual ships that the viewer
+cannot use (`Thumbs.db`, `desktop.ini`, `.DS_Store`, RTF or extensionless
+resources) are skipped and reported rather than failing the whole import, while
+unsafe or malicious entries (path traversal, absolute paths, Windows device
+names, symlinks, encrypted, duplicated or case-aliased entries) are still
+rejected. macOS `__MACOSX/` sidecars and AppleDouble `._*` forks are ignored as
+metadata, so they can never masquerade as a second `index.html`.
+
 An HTML entry-page import collects reachable files below its parent directory
 only; use **Import HTML Folder** for a full supplied folder tree. Enter source,
 rights and vehicle associations yourself; a title is not proof of completeness or

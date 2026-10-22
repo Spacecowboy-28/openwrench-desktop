@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from openwrench import __version__
 from openwrench.garage_ui import GaragePage
 from openwrench.diagnostics_ui import DiagnosticsPage
+from openwrench.library_tasks import DocumentTask
 from openwrench.storage import SCHEMA_VERSION, Store
 from openwrench.transfers import export_garage
 from openwrench.library_ui import RepairLibraryPage
@@ -90,6 +91,12 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.diagnostics_page.stop()
         self.library_page.stop()
+        # A backup or restore worker must not outlive the window. Killing the worker
+        # is safe: SQLite rolls back an interrupted restore and the safety backup and
+        # the exclusive-create backup path both leave no partial destination file.
+        task = getattr(self, 'storage_task', None)
+        if task is not None and not task.done:
+            task.cancel('Storage operation cancelled because the window closed.')
         super().closeEvent(event)
 
     def settings_page(self) -> QWidget:
@@ -229,12 +236,56 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, 'Save database backup', 'openwrench-backup.sqlite3', 'SQLite database (*.sqlite3)')
         if not filename:
             return
-        try:
-            self.store.backup(Path(filename))
-        except (OSError, ValueError, sqlite3.Error) as error:
-            QMessageBox.critical(self, 'Backup failed', str(error))
+        # A large workspace takes seconds to copy, so run it in the worker process
+        # and keep the window responsive; the worker reports success or failure.
+        self._run_storage_task('backup', dict(destination=filename),
+            f'Backup saved: {filename}', 'Backup failed')
+
+    def choose_restore(self):
+        if self.library_page.busy:
+            QMessageBox.information(self, 'Document task active', 'Finish or cancel the document task before restoring.')
             return
-        self.result.setText(f'Backup saved: {filename}')
+        self.library_page.stop()
+        filename, _ = QFileDialog.getOpenFileName(self, 'Choose an OpenWrench backup', '', 'SQLite database (*.sqlite3 *.db);;All files (*)')
+        if not filename:
+            return
+        answer = QMessageBox.question(self, 'Replace this workspace?',
+            'Restore replaces all current vehicles, history, documents, schedules, bookmarks, settings, and VIN cache with this backup. '
+            'Schema-1 backups contain settings only; schema-2 backups contain Garage records without a Repair Library. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._run_storage_task('restore', dict(source=filename), None, 'Restore failed')
+
+    def _run_storage_task(self, operation, parameters, success_text, failure_title):
+        """Run a backup or restore in the worker process so the GUI thread never
+        blocks. The worker owns its own Store connection and commits or rolls back
+        the whole restore inside one SQLite transaction."""
+        self.storage_buttons_enabled(False)
+        self.result.setText('Backup in progress…' if operation == 'backup' else 'Restore in progress…')
+        self.storage_task = DocumentTask(self.store, operation, parameters, self)
+        def finished(result, message):
+            self.storage_buttons_enabled(True)
+            if message:
+                QMessageBox.critical(self, failure_title, message)
+                self.result.setText(failure_title + '.')
+                return
+            if operation == 'restore':
+                self.garage.refresh()
+                self.library_page.refresh()
+                self.theme.blockSignals(True)
+                self.theme.setCurrentText(self.store.theme)
+                self.theme.blockSignals(False)
+                self.apply_theme(self.store.theme)
+                self.result.setText(f'Database restored. Previous workspace saved to: {result}')
+            else:
+                self.result.setText(success_text)
+        self.storage_task.finished.connect(finished)
+        self.storage_task.start()
+
+    def storage_buttons_enabled(self, enabled):
+        self.backup_button.setEnabled(enabled)
+        self.restore_button.setEnabled(enabled)
 
     def check_database(self) -> None:
         try:

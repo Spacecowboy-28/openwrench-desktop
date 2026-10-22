@@ -171,3 +171,49 @@ def test_folder_import_cancel_leaves_no_partial_document(app,tmp_path):
         assert page.documents.count()==0,page.status.text()
         assert (folder/'index.html').is_file()
         window.close()
+
+
+def test_backup_and_restore_run_in_the_worker_not_the_gui_thread(app,tmp_path,monkeypatch):
+    """Backup and restore must run in the worker process so the GUI thread never
+    blocks, and the window must re-read state once the worker finishes."""
+    from openwrench.library_tasks import DocumentTask
+    monkeypatch.setattr(QMessageBox,'critical',staticmethod(lambda *a,**k:None))
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        store.set_theme('light')
+        window=MainWindow(store);window.show()
+        destination=tmp_path/'backup.sqlite3'
+        operations=[]
+        original_start=DocumentTask.start
+        def recording_start(self):
+            operations.append(self.job['operation']);original_start(self)
+        monkeypatch.setattr(DocumentTask,'start',recording_start)
+        window._run_storage_task('backup',dict(destination=str(destination)),'Backup saved','Backup failed')
+        assert operations==['backup']
+        assert not window.backup_button.isEnabled()
+        wait_for(app,lambda:window.storage_task.done)
+        assert destination.is_file() and 'Backup saved' in window.result.text()
+        assert window.backup_button.isEnabled()
+        # A restore must bring back the earlier state and refresh the UI.
+        Garage(store).save_vehicle(dict(year=2011,make='Ford',model='F-150'))
+        store.set_theme('dark')
+        window._run_storage_task('restore',dict(source=str(destination)),None,'Restore failed')
+        wait_for(app,lambda:window.storage_task.done)
+        assert len(Garage(store).vehicles())==1
+        assert store.theme=='light' and window.theme.currentText()=='light'
+        assert 'restored' in window.result.text().lower()
+        window.close()
+
+
+def test_backup_failure_is_reported_and_buttons_recover(app,tmp_path,monkeypatch):
+    monkeypatch.setattr(QMessageBox,'critical',staticmethod(lambda *a,**k:None))
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        window=MainWindow(store);window.show()
+        existing=tmp_path/'exists.sqlite3';existing.write_bytes(b'x')
+        window._run_storage_task('backup',dict(destination=str(existing)),'Backup saved','Backup failed')
+        wait_for(app,lambda:window.storage_task.done)
+        assert window.backup_button.isEnabled() and window.restore_button.isEnabled()
+        assert 'Backup failed' in window.result.text()
+        assert existing.read_bytes()==b'x'
+        window.close()
+
