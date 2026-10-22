@@ -8,7 +8,6 @@ import argparse
 from contextlib import closing
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,6 +27,21 @@ def installed_version():
             return winreg.QueryValueEx(key, 'DisplayVersion')[0]
     except FileNotFoundError:
         return None
+
+
+def known_folder(identifier):
+    """Use Windows' folder locations, including any profile redirection."""
+    import ctypes
+    from ctypes import wintypes
+    function = ctypes.windll.shell32.SHGetFolderPathW
+    function.argtypes = (wintypes.HWND, ctypes.c_int, wintypes.HANDLE,
+                         wintypes.DWORD, wintypes.LPWSTR)
+    function.restype = wintypes.LONG
+    buffer = ctypes.create_unicode_buffer(32768)
+    result = function(None, identifier, None, 0, buffer)
+    if result:
+        raise OSError(f'Windows folder lookup failed: {result:#x}')
+    return Path(buffer.value)
 
 
 def snapshot(directory):
@@ -57,7 +71,7 @@ def main(argv=None):
     from openwrench.storage import Store
     from openwrench.transfers import read_tables
 
-    workspace = Path(os.environ['LOCALAPPDATA']) / 'OpenWrench' / 'OpenWrench'
+    workspace = known_folder(0x1C) / 'OpenWrench' / 'OpenWrench'  # CSIDL_LOCAL_APPDATA
     if workspace.exists() or installed_version() is not None:
         raise RuntimeError('Use a clean Windows CI account: an existing workspace or installation was found.')
     installers = [args.previous_installer.resolve(), args.installer.resolve()]
@@ -66,7 +80,8 @@ def main(argv=None):
     report = args.output_dir.resolve()
     report.mkdir(parents=True, exist_ok=True)
     group = 'OpenWrench acceptance ' + uuid4().hex
-    shortcuts = Path(os.environ['APPDATA']) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / group
+    shortcuts = known_folder(0x02) / group  # CSIDL_PROGRAMS
+    print(f'Acceptance workspace: {workspace}\nStart Menu group: {shortcuts}', flush=True)
     workspace.mkdir(parents=True)
     try:
         with closing(Store(workspace / 'openwrench.sqlite3')) as store:
@@ -113,6 +128,17 @@ def main(argv=None):
                                workspace_preserved=True)
                 (report / 'results.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
                 print(json.dumps(summary), flush=True)
+            except Exception:
+                # Keep the failing operation reviewable even when downloading
+                # Actions artifacts is unavailable. These logs contain only this
+                # synthetic install's paths and operations, not user records.
+                for path in sorted(report.glob('*.log')):
+                    raw = path.read_bytes()
+                    encoding = 'utf-16' if raw.startswith(b'\xff\xfe') else 'utf-8-sig'
+                    lines = raw.decode(encoding, errors='replace').splitlines()
+                    relevant = [line for line in lines[:-80] if 'shortcut' in line.lower() or 'icon' in line.lower()]
+                    print(f'--- {path.name} ---\n' + '\n'.join(relevant + lines[-80:]), flush=True)
+                raise
             finally:
                 if uninstaller.exists() and installed_version() is not None:
                     run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'])
