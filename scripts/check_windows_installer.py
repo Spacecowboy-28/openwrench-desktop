@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\{7C4B2E6A-9D3F-4A5B-9C1E-6F0A1B2C3D4E}_is1'
@@ -79,8 +78,12 @@ def main(argv=None):
         raise FileNotFoundError('Both the previous and current Windows installers are required.')
     report = args.output_dir.resolve()
     report.mkdir(parents=True, exist_ok=True)
-    group = 'OpenWrench acceptance ' + uuid4().hex
+    # Inno ignores /GROUP when DisableProgramGroupPage=yes. Verify the actual
+    # default folder that the production installer creates, not an unused override.
+    group = 'OpenWrench'
     shortcuts = known_folder(0x02) / group  # CSIDL_PROGRAMS
+    if shortcuts.exists():
+        raise RuntimeError('Use a clean Windows CI account: OpenWrench shortcuts already exist.')
     print(f'Acceptance workspace: {workspace}\nStart Menu group: {shortcuts}', flush=True)
     workspace.mkdir(parents=True)
     try:
@@ -100,7 +103,7 @@ def main(argv=None):
                                                       (args.previous_version, __version__)):
                     before = snapshot(workspace)
                     run([installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
-                         f'/DIR={destination}', f'/GROUP={group}', f'/LOG={report / (label + ".log")}'])
+                         f'/DIR={destination}', f'/LOG={report / (label + ".log")}'])
                     assert snapshot(workspace) == before, f'{label} modified the workspace'
                     executable = destination / 'OpenWrench.exe'
                     assert installed_version() == version, 'Wrong per-user uninstall registration'
