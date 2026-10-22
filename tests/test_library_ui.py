@@ -122,3 +122,98 @@ def test_recall_cancel_ignores_stale_reply(app):
     client.fetch(dict(year=2001,make='Toyota',model='Tundra'))
     client.cancel();reply.finished.emit()
     assert reply.aborted and not received
+
+
+def test_folder_import_action_imports_and_reports(app,tmp_path,monkeypatch):
+    """The new action must import a whole nested folder and explain limitations."""
+    from PySide6.QtWidgets import QFileDialog
+    from openwrench.library_ui import RepairLibraryPage
+    from test_html_library import synthetic_folder
+    class _Field:
+        def setText(self,*a):pass
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        vehicle=Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        window=MainWindow(store);window.show();window.open_vehicle_library()
+        page=window.library_page
+        assert 'Import HTML Folder' in [b.text() for b in page.document_buttons]
+        folder=synthetic_folder(tmp_path/'manual')
+        (folder/'assets'/'nav.js').write_bytes(b'menu()')
+        monkeypatch.setattr(QFileDialog,'getExistingDirectory',staticmethod(lambda *a,**k:str(folder)))
+        class FakeDialog:
+            def __init__(self,*a,**k):self.fields={'title':_Field()}
+            def exec(self):return True
+            @property
+            def payload(self):return (dict(details(),applicability='{}'),[vehicle])
+        monkeypatch.setattr('openwrench.library_ui.DocumentDialog',FakeDialog)
+        shown=[]
+        monkeypatch.setattr(RepairLibraryPage,'show_notice',lambda self,notice:shown.append(notice))
+        page.import_folder()
+        wait_for(app,lambda:not page.busy)
+        assert page.documents.count()==1,page.status.text()
+        assert shown and shown[0]['entry']=='index.html'
+        assert 'assets/nav.js' in shown[0]['inactive']
+        assert any('JavaScript' in note for note in shown[0]['notes'])
+        identifier=page.selected_document()[0]
+        assert page.library.document(identifier)['format']=='html'
+        window.close()
+
+
+def test_folder_import_cancel_leaves_no_partial_document(app,tmp_path):
+    from test_html_library import synthetic_folder
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        vehicle=Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        window=MainWindow(store);window.show();window.open_vehicle_library()
+        page=window.library_page
+        folder=synthetic_folder(tmp_path/'manual')
+        page.run_task('import',dict(source=str(folder),metadata=details(),vehicles=[vehicle]))
+        page.cancel.click()
+        wait_for(app,lambda:not page.busy)
+        assert page.documents.count()==0,page.status.text()
+        assert (folder/'index.html').is_file()
+        window.close()
+
+
+def test_backup_and_restore_run_in_the_worker_not_the_gui_thread(app,tmp_path,monkeypatch):
+    """Backup and restore must run in the worker process so the GUI thread never
+    blocks, and the window must re-read state once the worker finishes."""
+    from openwrench.library_tasks import DocumentTask
+    monkeypatch.setattr(QMessageBox,'critical',staticmethod(lambda *a,**k:None))
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        store.set_theme('light')
+        window=MainWindow(store);window.show()
+        destination=tmp_path/'backup.sqlite3'
+        operations=[]
+        original_start=DocumentTask.start
+        def recording_start(self):
+            operations.append(self.job['operation']);original_start(self)
+        monkeypatch.setattr(DocumentTask,'start',recording_start)
+        window._run_storage_task('backup',dict(destination=str(destination)),'Backup saved','Backup failed')
+        assert operations==['backup']
+        assert not window.backup_button.isEnabled()
+        wait_for(app,lambda:window.storage_task.done)
+        assert destination.is_file() and 'Backup saved' in window.result.text()
+        assert window.backup_button.isEnabled()
+        # A restore must bring back the earlier state and refresh the UI.
+        Garage(store).save_vehicle(dict(year=2011,make='Ford',model='F-150'))
+        store.set_theme('dark')
+        window._run_storage_task('restore',dict(source=str(destination)),None,'Restore failed')
+        wait_for(app,lambda:window.storage_task.done)
+        assert len(Garage(store).vehicles())==1
+        assert store.theme=='light' and window.theme.currentText()=='light'
+        assert 'restored' in window.result.text().lower()
+        window.close()
+
+
+def test_backup_failure_is_reported_and_buttons_recover(app,tmp_path,monkeypatch):
+    monkeypatch.setattr(QMessageBox,'critical',staticmethod(lambda *a,**k:None))
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        window=MainWindow(store);window.show()
+        existing=tmp_path/'exists.sqlite3';existing.write_bytes(b'x')
+        window._run_storage_task('backup',dict(destination=str(existing)),'Backup saved','Backup failed')
+        wait_for(app,lambda:window.storage_task.done)
+        assert window.backup_button.isEnabled() and window.restore_button.isEnabled()
+        assert 'Backup failed' in window.result.text()
+        assert existing.read_bytes()==b'x'
+        window.close()
+

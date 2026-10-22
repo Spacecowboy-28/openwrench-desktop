@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QImageReader, QPainter, QTextDocument
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QDialog,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,QTextBrowser,QComboBox
-from openwrench.html_bundle import StaticHTML, inspect, safe_path, safe_svg, HTML
+from openwrench.html_bundle import StaticHTML, safe_path, safe_svg, read_bundle_dir, HTML, TRUNCATED
 from openwrench.library_tasks import DocumentTask
 
 
@@ -54,6 +54,11 @@ class OfflineBrowser(QTextBrowser):
 
 
 class HtmlViewer(QDialog):
+    # Rendered pages are cached so Back/Forward/Home and anchor jumps do not
+    # re-parse. The cache is dropped whole once it exceeds the budget, which
+    # keeps memory bounded for very large manuals at the cost of a re-parse.
+    RENDER_CACHE_BYTES = 32 * 1024 * 1024
+
     def __init__(self, library, identifier, page=1, parent=None):
         super().__init__(parent)
         self.library,self.identifier = library,identifier
@@ -61,6 +66,8 @@ class HtmlViewer(QDialog):
         self.sections = library.html_sections(identifier)
         self.history,self.position = [],-1
         self.current = None
+        self.rendered = {}
+        self.rendered_bytes = 0
         self.setWindowTitle(self.doc['title']+' — Offline HTML')
         self.resize(1000,750)
         layout = QVBoxLayout(self);bar = QHBoxLayout();layout.addLayout(bar)
@@ -79,10 +86,16 @@ class HtmlViewer(QDialog):
         def loaded(result,message):
             if message:self.status.setText(message);return
             try:
-                self.browser.files = library.html_files(identifier)
-                issues = inspect(self.browser.files)
+                # The worker already read and inspected the validated bundle, so
+                # only the cheap directory load happens here on the GUI thread.
+                bundle = self.task.bundle or {}
+                root = bundle.get('root') or (result.get('root') if isinstance(result,dict) else result)
+                self.browser.files = read_bundle_dir(root)
+                issues = result.get('issues',[]) if isinstance(result,dict) else []
                 self.report = issues
-                self.status.setText(f'{len(issues)} missing/blocked references. Completeness is not guaranteed. Scripts disabled; static layout only.')
+                truncated = any(i['reason']==TRUNCATED for i in issues)
+                shown = sum(1 for i in issues if i['reason']!=TRUNCATED)
+                self.status.setText((f'{shown}+' if truncated else f'{shown}')+' missing/blocked references. Completeness is not guaranteed. Scripts disabled; static layout only.')
                 self.status.setToolTip('\n'.join(f"{r['page']}: {r['reason']} — {r['reference']}" for r in issues))
                 report = QPushButton('Resource report',self)
                 bar.addWidget(report)
@@ -102,8 +115,15 @@ class HtmlViewer(QDialog):
         if path not in self.browser.files or PurePosixPath(path).suffix.lower() not in HTML:
             self.status.setText('Missing or unsupported internal document: '+path);return
         if not self.current or self.current[0]!=path:
-            parsed=StaticHTML(path,self.browser.files)
-            self.browser.setHtml(''.join(parsed.output))
+            html = self.rendered.get(path)
+            if html is None:
+                parsed=StaticHTML(path,self.browser.files)
+                html=''.join(parsed.output)
+                if len(html) > self.RENDER_CACHE_BYTES or self.rendered_bytes+len(html) > self.RENDER_CACHE_BYTES:
+                    self.rendered.clear();self.rendered_bytes=0
+                if len(html) <= self.RENDER_CACHE_BYTES:
+                    self.rendered[path]=html;self.rendered_bytes+=len(html)
+            self.browser.setHtml(html)
         self.browser.scrollToAnchor(anchor)
         self.current=(path,anchor)
         if record:

@@ -29,6 +29,27 @@ Qt deployment: https://doc.qt.io/qtforpython-6/deployment/index.html
 `diagnostics.py` defines a read-only adapter contract. The diagnostic contract does not implement a vehicle driver. Repair providers
 now expose metadata and external references, without a scraper or content mirror.
 
+`diagnostics_sim.py` is a deterministic read-only simulator (normal, misfire,
+electrical, communication-failure and code-status scenarios). `diagnostics_hardware.py`
+is an optional, disabled-by-default ELM327/STN adapter that only ever transmits
+read-only service modes; mode 04 is refused before any byte is sent. Both share one
+contract, one sample-status vocabulary (`ok`/`unsupported`/`stale`/`timeout`/`disconnected`)
+and one code-mode vocabulary (`03` stored, `07` pending, `0A` permanent).
+`diagnostics_worker.py` acquires samples and codes on a worker `QThread`; SQLite
+never crosses a thread boundary and the GUI thread owns all persistence.
+`diagnostics_session.py` persists bounded sessions, samples and codes transactionally.
+`diagnostics_ui.py` is a scrollable native page: a single selectable-sensor graph with
+labelled axes, a fixed readout grid, readable code/session lists and a guided-diagnosis
+panel. Live per-PID history is bounded, so a long session cannot grow the GUI.
+
+`diagnostic_trees.py` holds authored, versioned misfire and electrical reasoning
+aid trees (not manufacturer procedures); every outcome carries actions and a severity
+and never asserts a repair value. `diagnostic_guide.py` derives boolean evidence only
+from stored session data and *suggests* branches while allowing any manual choice.
+`guide_service.py`/`guide_schema.py` persist guided runs (schema 6) with the tree id and
+version and the chosen path. A saved run can be resumed against the exact revision it
+started under, so a later tree update never silently rewords an earlier diagnosis.
+
 Future serial, network, PDF indexing and polling work must use a worker thread
 or process with bounded timeouts and Qt signals back to the UI. SQLite connections
 remain in their owning thread. Serial reads must never block the GUI event loop.
@@ -51,11 +72,37 @@ combination before integrating it or changing the overall distribution license.
 ## Packaging and upgrade policy
 
 Development builds use onedir bundles for inspectability and replacement of
-shared libraries. No auto-update endpoint, code signing key, release upload, or
-installer exists in milestone 1. CI builds on Windows and Linux separately.
+shared libraries. No auto-update endpoint, code signing key, or release upload
+exists yet. CI builds on Windows and Linux separately.
 Milestone 6 adds a Windows installer, install/upgrade/uninstall validation,
 runtime attribution/source inventory, signing decision, and an approved release.
 macOS needs a native build runner and testing before claiming support.
+
+### Packaging layout (milestone 6)
+
+Packaging is code, not checked-in blobs, so no binary can drift from its source:
+
+- `scripts/make_icon.py` renders `openwrench.png` and a six-size `openwrench.ico`
+  from Qt. The first render at each size warms Qt's glyph cache and is discarded,
+  so output is byte-reproducible across processes. Qt's own ICO writer emits a
+  single image; `_write_ico` composes the multi-size PNG-entry ICO that Windows
+  shell and taskbar require.
+- `scripts/write_version_info.py` derives the Windows VS_VERSIONINFO resource and
+  every version string from `openwrench.__version__`, and `--check` fails when it
+  disagrees with `pyproject.toml`.
+- `src/openwrench/resources.py` is the only module that knows the frozen
+  (`sys._MEIPASS`) and source layouts, so callers never guess a resource path.
+- `scripts/build_desktop.py` renders icons and the version resource, then freezes
+  with PyInstaller (onedir, `collect_all` for pypdfium2) and bundles `assets/`.
+- `installer/openwrench.iss` is a static Inno Setup 6 script; the build script
+  injects the version and source directory as `/D` defines.
+- `scripts/make_installer.py` and `scripts/make_linux_package.py` assemble the
+  Windows installer and the relocatable Linux tarball.
+
+Data preservation is a packaging invariant, not an installer option: the workspace
+lives under Qt's `AppLocalDataLocation`, never the install directory. The Windows
+uninstaller deletes program files only and asks before removing the workspace,
+defaulting to No. The Linux `install.sh` writes solely under `$PREFIX`.
 
 Data lives outside the installation directory. Database migrations run before
 window construction. Reject newer schema versions. Before future destructive
@@ -83,6 +130,9 @@ through the original Store connection. Existing Garage objects keep their valid
 connection. A verified safety backup precedes replacement; concurrent commits
 from another connection cause cancellation. Strict schema matching rejects extra
 triggers, views and tables. No imported schema executes against the live workspace.
+Backup and restore run in the worker process (`pdf_worker.py` `backup`/`restore`
+operations) so copying a large workspace never blocks the GUI thread; the worker
+owns its own `Store` connection and the restore transaction still rolls back whole.
 
 ## Milestone 3 extension
 
@@ -133,8 +183,32 @@ No data from a model response substitutes for manufacturer technical information
 
 ### Static HTML bundles
 
-`html_bundle.py` validates bounded ZIP entries and reachable local HTML resources,
-canonicalizes bundles, indexes stable file/anchor sections and audits references.
+`html_bundle.py` validates bounded ZIP entries, walks a selected manual folder,
+and resolves reachable local HTML resources; it canonicalizes bundles, indexes
+stable file/anchor sections and audits references.
+
+ZIP import (`read_zip`) skips and reports ordinary files the viewer cannot use
+(`Thumbs.db`, `desktop.ini`, `.DS_Store`, RTF, extensionless resources) and treats
+macOS `__MACOSX/` and AppleDouble `._*` entries as metadata, so they cannot fake a
+second entry page. Every safety rule stays fatal: unsafe or normalized paths,
+symlinks/reparse points, encrypted or duplicated entries, case aliases, non-regular
+entries and the size budgets. `describe_bundle` is shared by ZIP, folder and
+single-page imports so all three report the same entry page, dropped active
+content and omitted files.
+
+Folder import (`read_bundle_folder`) is the whole-tree counterpart to ZIP import.
+It walks with `os.scandir` in the worker, never following a symlink or Windows
+reparse point (junction/mount), and requires every resolved path to stay under the
+chosen root, so a link cannot pull in files outside the manual. It keeps relative
+paths, skips files whose names fail `safe_path`, records a skipped report instead
+of failing the whole import, and enforces `MAX_FILES`/`MAX_TOTAL`/`MAX_FILE`,
+`MAX_ENTRIES` and `MAX_DEPTH` so a huge or hostile tree stops with a named limit.
+`entry_page` prefers `index`/`default`/`toc`, then the shallowest page, and returns
+a human explanation when the choice is ambiguous. Files the viewer cannot display
+but can store (scripts, fonts, data) are kept and reported; formats the bundle
+cannot store are reported separately. The walk reads bytes but never writes,
+moves or deletes inside the source folder.
+
 Schema 4 retains original canonical ZIP bytes in `document_files`; `html_sections`
 maps FTS page integers and bookmarks to paths/anchors. Existing schema-3 DDL stays
 unchanged so strict restore validation recognizes old backups. Migration adds a
@@ -149,7 +223,15 @@ stored data, never executed. Only links within the imported bundle navigate.
 A fresh staging folder plus rename materializes validated files; existing cached
 files must match stored bytes. The viewer reads canonical validated database bytes,
 not arbitrary cached files. Import/extraction remains in the existing QProcess
-worker; sanitized page layout/resource inspection has bounded GUI-thread work.
+worker. The `materialize` operation also loads the validated bundle directory and
+audits references inside that worker and reports the result alongside the path, so
+the GUI thread only walks the staged directory (a few milliseconds) instead of
+re-inflating the ZIP and reparsing every page. Rendered pages are memoized in a
+bounded 32 MiB cache so Back/Forward/Home do not re-parse. Archive budgets are
+declared-size based: `MAX_ARCHIVE` (128 MiB stored) intentionally exceeds
+`MAX_TOTAL` (100 MiB expanded) so any legal bundle can be repacked, and a
+compression-ratio heuristic is deliberately absent because it rejected legitimate
+repetitive manuals.
 
 Qt supports a limited rich-text subset, not general browser layout. This tradeoff
 avoids adding a Chromium scripting/network engine for static documentation:

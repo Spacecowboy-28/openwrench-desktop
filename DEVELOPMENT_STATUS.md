@@ -1,85 +1,102 @@
 # Development status
 
-Date: 2026-10-16. Version: 0.3.0.dev1. Branch: dev/milestone-3.
+Date: 2026-10-16. Version: 0.3.0.dev1. Branch: dev/milestone-4-openhands.
 Main baseline: `04c9b881c9f73d84e2d5af2b80c740be967bfbc7`.
 Milestones 1 and 2 merged through PR #1 and PR #3. The user reported successful
 Windows acceptance of Milestone 2, including its export/restore follow-up.
+Milestone 3 is on `dev/milestone-3` (PR #4). Milestones 4 and 5 are implemented on
+`dev/milestone-4-openhands`, which targets `dev/milestone-3`.
 
-## Implemented Milestone 3 scope
+## Implemented Milestone 4 scope
 
-- Native Repair Library linked to existing Garage UUIDs, categories, metadata,
-  multi-vehicle associations and configuration/applicability states.
-- Lawful local PDF import, duplicate/content validation, isolated cancellable
-  workers, offline FTS5 page search, native page/zoom/pan viewer and bookmarks.
-- LEMON/CHARM browser references with explicit uncertain coverage/access labels.
-  No scraping, automatic downloads or redistribution. Explicit NHTSA recall API
-  queries retain campaign identifiers; manufacturer communications use official
-  portal/dataset links, not a complete manual or TSB ingestion claim.
-- User-defined or user-verified manufacturer schedules, cited provenance,
-  conditions/specifications, linked service/procedure records, next-due values
-  and in-app reminders. No invented technical values or preloaded factory data.
-- Schema 4 with pre-migration snapshots and transactional rollback. SQLite holds
-  canonical PDF bytes and HTML bundle bytes for self-contained backup/restore. Viewing files recover
-  offline in a dedicated adjacent document directory. Restore validates schemas
-  1/2/3/4 and rebuilds FTS. Metadata exports omit document bytes and extracted content.
+- Versioned read-only PID catalog, sample/session status vocabularies and
+  diagnostic-code records. No write, actuation or DTC-clearing mode exists.
+- Deterministic simulator (`normal`, `misfire`, `electrical`, `comms`) with
+  reproducible per-tick values and unsupported/timeout/disconnect behavior.
+- Schema 5 sessions, bounded samples and codes, with pre-migration snapshots and
+  transactional rollback.
+- Off-thread `QThread` acquisition; the GUI thread owns persistence and SQLite
+  never crosses a thread boundary.
+- Native Diagnostics page with a dependency-free sensor graph, review/delete and
+  a Settings opt-in toggle for experimental read-only USB hardware.
+- Lazily-imported ELM/STN adapter with capability negotiation, multi-frame DTC
+  parsing and a hard refusal of mode 04.
+
+## Implemented Milestone 5 scope
+
+- Schema 6 guided runs recording the decision-tree id/version and chosen path,
+  so a diagnosis stays reproducible after a tree is revised.
+- Two authored, versioned decision trees (misfire and electrical). They are
+  reasoning aids, not manufacturer procedures, and assert no repair value:
+  every outcome carries actions and a severity, and any specific test value is
+  deferred to official service information.
+- Deterministic, explainable guide engine: evidence is derived only from stored
+  session data (codes and captured RPM/voltage series) and only *suggests* a
+  branch. A user may always choose any option.
+- Guided runs participate in export, validated restore and CSV export.
+
+## Usability and quality pass (post-acceptance)
+
+After physical Windows GUI testing of Milestones 4 and 5, this pass fixes and
+improves:
+
+- Diagnostics page is now inside a scroll area, so nothing clips at small window
+  sizes or high display scaling; controls, readouts and the graph sit in titled
+  cards with a consistent grid.
+- The graph plots one selectable sensor at a time with labelled axes, unit and
+  elapsed-time ticks; unrelated units are no longer overlaid. Live history is
+  bounded per PID (`MAX_LIVE_POINTS`) and saved sessions load into the graph.
+- Fixed `on_batch` calling `setText` on `None`: only real readout labels are
+  updated, and history is captured for every supported PID.
+- Codes now keep their real response mode. The acquisition layer reads modes
+  03/07/0A separately, so a pending code is stored as mode 07, not mode 03.
+- Guided diagnosis: options are full-width clickable buttons, both trees reach an
+  outcome, unfinished runs can be saved and resumed (against their own tree
+  revision), a run stays bound to its session, and selecting a guide that does not
+  match the evidence shows an informational note without blocking the choice.
+- Historical tree revisions are retained in `TREE_VERSIONS`/`get_tree`, so a run
+  saved under an older tree version remains valid after a future update.
+- Communication failure is distinct end to end: the simulator timeouts, then drops
+  the link; the worker reports `disconnected`; the UI stores the session as failed.
+  Cancellation and worker cleanup are covered by tests.
+
+## Milestone 3 HTML hardening (found during a read-only audit of PR #4)
+
+An engineering audit of the Milestone 3 offline-HTML code found and fixed:
+
+- A compression-ratio heuristic in `read_zip` rejected legitimate high-ratio
+  manuals (repetitive torque tables, repeated inline styles). It was removed; the
+  declared per-member and total budgets are now the only contract, and a header
+  that understates its size is still caught while the member is read.
+- The archive budget was clarified: `MAX_ARCHIVE` (128 MiB stored) must exceed
+  `MAX_TOTAL` (100 MiB expanded) so `pack()` always round-trips a legal bundle.
+- `read_zip`'s path-conflict check was quadratic in the number of members; a
+  parent-is-a-file lookup replaced the nested scan (deep-path case ~2690 ms to
+  ~144 ms).
+- `inspect()` now reports a page whose content was truncated because a
+  `script`/`style`/`iframe` tag was left unclosed, instead of silently dropping
+  the remainder. `StaticHTML` and the cheap `_DropScanner` share `DROP_TAGS`.
+- GUI-thread blocking while opening a large manual was removed. The
+  `materialize` worker operation now also loads the validated bundle directory
+  (`read_bundle_dir`) and runs `inspect()` off-thread, returning
+  `{root, issues}`; the GUI thread only walks the staged directory. Rendered pages
+  are memoized in a bounded 32 MiB cache so Back/Forward/Home do not re-parse.
 
 ## Validation and commits
 
-Baseline: 83 tests passed before changes. Current local suite: 143 passed.
-Source distribution, wheel and Linux native directory bundle built. Packaged
-startup plus actual packaged PDF import, FTS search and rendering passed.
-Native Repair Library and source-tab layouts were inspected with Qt offscreen.
-No physical Windows testing occurred in this session. Windows/Linux CI performs
-separate tests/builds/startup and packaged PDF worker checks on the review PR.
-
-Functional checkpoint commits:
-- aca7f67: schema, recovery, document/search and maintenance services.
-- d92649e: native UI, isolated workers, recall requests and packaging checks.
-- The review-completion commit adds regression cases and handoff documentation.
+Earlier suite: 191 passed. Current suite: 221 passed under
+`QT_QPA_PLATFORM=offscreen`. Migration/rollback, malformed-restore rejection,
+simulator determinism, protocol parsing via a fake transport, off-thread recording,
+code-mode tracking, bounded history, the guided walk/resume and both decision trees
+are covered. The HTML hardening adds tests for high-ratio import/repack, archive
+and stored-size budgets, unclosed drop tags, bundle-directory/read_zip parity with
+symlink rejection, and a guard that opening a manual never re-reads the bundle on
+the GUI thread.
 
 ## Remaining limitations
 
-LEMON's listed Lexus pages failed to load during research; CHARM access was
-intermittent. Catalog links are not confirmed procedure coverage. Tundra/Civic
-engine/trim/drivetrain remain unknown; Lexus drivetrain remains unconfirmed.
-Exact-string applicability is conservative and does not infer mechanical aliases.
-User verification labels record a declaration, not independent manufacturer review.
-
-No OCR, manual-site downloading/indexing, imported TSB corpus, verified factory
-schedule dataset, background OS notifications or diagnostics. PDF limits are
-50 MiB/file, 5,000 pages, 20 MiB extracted text and 16 million pixels/render.
-SQLite restore accepts files up to 1 GiB. Large Settings backup/restore operations
-still run synchronously. Cached viewing copies remain until explicit user cleanup.
-Schema-1/2 restores intentionally replace the Repair Library with empty records.
-
-## Exact next step
-
-Review the Milestone 3 PR and run the Windows desktop acceptance steps in
-`docs/MILESTONE_3.md`. Keep Issue #2 open until acceptance completes. Do not merge
-automatically, publish installers/releases, or begin Milestone 4. Research and
-rights evidence lives in `docs/MILESTONE_3_SOURCES.md`; dependency notices live in
-THIRD_PARTY.md. The app preserves all original user records and Git history.
-
-## Offline HTML follow-up
-
-The user reports successful Windows Milestone 3 startup and Repair Library search.
-This extension adds generic lawful HTML/HTM/ZIP import, bounded archive validation,
-relative resources, sanitized native static viewing, navigation/zoom/bookmarks,
-vehicle-linked section search, broken-reference reports and self-contained restore.
-QTextBrowser was chosen over Qt WebEngine to avoid a script/network-capable
-browser engine. Only static HTML and a conservative CSS/SVG subset are supported.
-Script-generated navigation/content, modern layout, CSS imports/background images,
-OCR and completeness certification remain outside scope.
-
-No LEMON or other third-party manual content was imported into the repository.
-All new HTML/CSS/JS/SVG fixtures are original synthetic tests. The supplied entry
-page description is not evidence of complete procedures or this vehicle's fit.
-No unknown Tundra/Civic engine/trim or Lexus drivetrain values were inferred.
-
-Validation includes ZIP paths/symlinks/aliases/size limits, missing links/assets,
-blocked local/network resources, static SVG rendering, vehicle-filtered search,
-section navigation/bookmarks, cancellation, duplicate imports, schema-3 migration,
-transaction rollback, metadata-only JSON/CSV and portable HTML recovery. Existing
-PDF, Garage, Settings and migration regressions remain in the full suite.
-Windows/Linux CI also runs packaged HTML ZIP import/search/extraction/restore
-alongside the existing PDF import/render and packaged startup checks.
+No physical adapter or vehicle testing occurred. The USB path is experimental,
+disabled by default and unit-tested only through a fake transport; no adapter
+compatibility is claimed. Windows/Linux behavior was reviewed by inspection and
+offscreen runs, not by packaged Windows acceptance. The decision trees are not
+manufacturer procedures and must not be treated as such.

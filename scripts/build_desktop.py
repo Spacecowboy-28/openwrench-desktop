@@ -1,20 +1,44 @@
 """Build a same-platform development bundle. No cross-compilation or publishing."""
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / 'build' / 'assets'
+
+
+def generate_icon():
+    """Render the application icon set before freezing so the bundle embeds it."""
+    from PySide6.QtGui import QGuiApplication
+    QGuiApplication.instance() or QGuiApplication([sys.argv[0]])
+    sys.path.insert(0, str(ROOT / 'scripts'))
+    from make_icon import build, render, ICO_SIZES
+    build(ASSETS)
+    # Linux hicolor themes need standalone PNGs at each declared size.
+    for size in ICO_SIZES:
+        render(size).save(str(ASSETS / f'openwrench-{size}.png'), 'PNG')
+    return ASSETS
 
 
 def main():
+    generate_icon()
+    # Keep the Windows version resource in lockstep with the icon; both are derived
+    # from openwrench.__version__ so a release bump cannot leave one stale.
+    version_file = ROOT / 'build' / 'version_info.txt'
+    subprocess.run([sys.executable, str(ROOT / 'scripts' / 'write_version_info.py'),
+                    '--check', '--version-file', str(version_file)], check=True, cwd=ROOT)
     subprocess.run([
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
         '--onedir', '--name', 'OpenWrench', '--paths', str(ROOT / 'src'),
         '--specpath', str(ROOT / 'build'), '--distpath', str(ROOT / 'dist'),
         '--workpath', str(ROOT / 'build' / 'pyinstaller'),
         '--collect-all', 'pypdfium2', '--collect-all', 'pypdfium2_raw',
+        '--add-data', f'{ASSETS}{os.pathsep}assets',
+        '--icon', str(ASSETS / 'openwrench.ico'),
+        '--version-file', str(version_file),
         '--exclude-module', 'PySide6.QtQml', '--exclude-module', 'PySide6.QtQuick',
         str(ROOT / 'scripts' / 'desktop_entry.py'),
     ], check=True, cwd=ROOT)

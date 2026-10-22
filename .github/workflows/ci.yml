@@ -45,6 +45,22 @@ jobs:
       - name: Windows packaged PDF / HTML acceptance
         if: runner.os == 'Windows'
         run: python scripts/check_packaged_library.py ./dist/OpenWrench/OpenWrench.exe
+      - name: Linux portable package
+        if: runner.os == 'Linux'
+        run: python scripts/make_linux_package.py --bundle-dir dist/OpenWrench --output-dir dist
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup --no-progress -y
+          python scripts/make_installer.py --source-dir dist/OpenWrench --output-dir dist
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}
+          path: |
+            dist/OpenWrench-*-setup.exe
+            dist/OpenWrench-*-linux-*.tar.gz
+          if-no-files-found: ignore
       # Binary distribution is gated on the milestone-6 license/source audit,
       # native installation tests, signing decision, and user release approval.
       - uses: actions/upload-artifact@v4
@@ -52,5 +68,5 @@ jobs:
           name: source-packages-${{ runner.os }}
           path: |
             dist/*.whl
-            dist/*.tar.gz
+            dist/openwrench_desktop-*.tar.gz
           if-no-files-found: error

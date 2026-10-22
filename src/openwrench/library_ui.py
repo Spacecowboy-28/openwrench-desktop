@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (QWidget,QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QGridLayout,
     QLabel,QPushButton,QComboBox,QLineEdit,QListWidget,QListWidgetItem,QDialogButtonBox,
-    QMessageBox,QFileDialog,QTabWidget,QCheckBox,QSpinBox,QGraphicsView,QGraphicsScene,QProgressBar,QScrollArea)
+    QMessageBox,QFileDialog,QTabWidget,QCheckBox,QSpinBox,QGraphicsView,QGraphicsScene,QProgressBar,QScrollArea,QTextBrowser)
 from openwrench.garage import Garage
 from openwrench.library import Library,VERIFICATIONS
 from openwrench.library_schema import CATEGORIES
@@ -169,7 +169,11 @@ class PdfViewer(QDialog):
     def external(self):
         if self.task and not self.task.done:self.task.cancel()
         self.task=DocumentTask(self.library.store,'materialize',dict(id=self.identifier),self)
-        self.task.finished.connect(lambda result,message:error(self,message) if message else QDesktopServices.openUrl(QUrl.fromLocalFile(result)))
+        def opened(result,message):
+            if message:error(self,message);return
+            root=result.get('root') if isinstance(result,dict) else result
+            QDesktopServices.openUrl(QUrl.fromLocalFile(root))
+        self.task.finished.connect(opened)
         self.task.start()
 
     def reject(self):
@@ -246,8 +250,8 @@ class RepairLibraryPage(QWidget):
         local_layout.addWidget(self.documents,1)
         self.detail=plain('Import a lawful PDF to begin. No repair specifications are preloaded.');local_layout.addWidget(self.detail)
         actions=QGridLayout();self.document_buttons=[]
-        for index,(title,callback) in enumerate([('Import PDF / HTML / ZIP',self.import_pdf),('Open document',self.open_document),('Edit details / vehicles',self.edit_document),
-            ('Rebuild index',self.reindex),('Locate original',self.locate),('Remove document',self.delete_document)]):
+        for index,(title,callback) in enumerate([('Import PDF / HTML / ZIP',self.import_pdf),('Import HTML Folder',self.import_folder),('Open document',self.open_document),
+            ('Edit details / vehicles',self.edit_document),('Rebuild index',self.reindex),('Locate original',self.locate),('Remove document',self.delete_document)]):
             button=QPushButton(title);button.clicked.connect(callback);actions.addWidget(button,index//3,index%3);self.document_buttons.append(button)
         local_layout.addLayout(actions)
         online=QWidget();online_layout=QVBoxLayout(online);self.tabs.addTab(online,'Online sources')
@@ -364,13 +368,38 @@ class RepairLibraryPage(QWidget):
         def complete(result,message):
             self.local.setEnabled(True);self.cancel.hide();self.progress.hide()
             self.status.setText(message or 'Document operation complete.');self.reload()
+            notice=getattr(self.task,'notice',None)
+            if not message and notice:
+                self.show_notice(notice)
         self.task.finished.connect(complete);self.task.start()
+
+    def show_notice(self,notice):
+        """Explain what the static viewer can and cannot show, rather than
+        silently importing an incomplete manual."""
+        from openwrench.html_bundle import folder_report_text
+        dialog=QDialog(self);dialog.setWindowTitle('Import report');dialog.resize(720,520)
+        layout=QVBoxLayout(dialog)
+        layout.addWidget(plain('The folder was imported. Review anything the offline viewer cannot show.'))
+        view=QTextBrowser(dialog);view.setPlainText(folder_report_text(notice))
+        layout.addWidget(view,1)
+        buttons=QHBoxLayout();buttons.addStretch(1)
+        close=QPushButton('Close');close.clicked.connect(dialog.accept);buttons.addWidget(close)
+        layout.addLayout(buttons);dialog.exec()
 
     def import_pdf(self):
         source,_=QFileDialog.getOpenFileName(self,'Import a lawful document','','Supported documents (*.pdf *.html *.htm *.zip);;All files (*)')
         if not source:return
         dialog=DocumentDialog(self.library,self.vehicle.currentData(),parent=self)
         dialog.fields['title'].setText(Path(source).stem)
+        if dialog.exec():
+            values,vehicles=dialog.payload
+            self.run_task('import',dict(source=source,metadata=values,vehicles=vehicles))
+
+    def import_folder(self):
+        source=QFileDialog.getExistingDirectory(self,'Import a whole offline manual folder')
+        if not source:return
+        dialog=DocumentDialog(self.library,self.vehicle.currentData(),parent=self)
+        dialog.fields['title'].setText(Path(source).name)
         if dialog.exec():
             values,vehicles=dialog.payload
             self.run_task('import',dict(source=source,metadata=values,vehicles=vehicles))

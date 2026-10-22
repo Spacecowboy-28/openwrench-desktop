@@ -1,3 +1,40 @@
+# Milestone 4/5 GUI acceptance and usability pass
+
+Date: 2026-10-16. Environment: Linux x86_64, Python 3.13, Qt 6.8.3.
+
+Physical Windows GUI testing of Milestones 4 and 5 by the owner exercised the
+Normal, Misfire, Electrical and Communication Failure simulator scenarios:
+sessions started, stored samples and displayed data. P0301/P0300 and P0562 were
+observed. Two defects and several usability issues found in that testing were
+fixed here, each with a regression test.
+
+| Check | Result | Scope |
+| --- | --- | --- |
+| `python -m pytest -q` | 221 passed, ~53 seconds | Full suite including new diagnostics/guide/UI and HTML-hardening tests |
+| Diagnostics page scroll + layout | Passed | `QScrollArea` present; cards, grids, no clipping under offscreen rendering |
+| Single selectable-sensor graph | Passed | One sensor plotted with axes/unit/time; selector switches sensor |
+| Graph reflects saved session | Passed | Reviewed session loads stored points into the graph |
+| `on_batch` None label bug | Fixed | Unlabeled PIDs captured in history, no `setText(None)`; regression test |
+| Code mode tracking | Fixed | Pending code stored as mode 07, permanent as 0A; stored/pending/permanent tests |
+| Guide completion (both trees) | Passed | Every root option reaches an outcome for misfire and electrical |
+| Guide resume | Passed | Unfinished runs save, list, and resume against their own tree revision |
+| Mismatched guide selection | Passed | Informational note shown; selection not blocked |
+| Historical tree version | Passed | Run from an archived revision still validates after the live tree is revised |
+| Communication failure | Passed | Timeout then `disconnected`; session stored as failed |
+| Cancellation / worker cleanup | Passed | Stop leaves no active thread/recorder; status `interrupted` |
+| HTML high-ratio manual import | Fixed | Ratio heuristic removed; repetitive manual imports and repacks; regression test |
+| Archive/stored-size budgets | Passed | `MAX_ARCHIVE` > `MAX_TOTAL`; declared-size rejection tested |
+| Deep-path archive read | Fixed | Quadratic conflict check replaced; ~2690 ms to ~144 ms on the deep-path case |
+| Unclosed drop-tag reporting | Fixed | `inspect()` flags truncated pages; shared `DROP_TAGS`; regression test |
+| Truncated resource report | Fixed | `inspect()` caps at `MAX_ISSUES` and appends an explicit `TRUNCATED` sentinel; viewer shows `N+`; regression test |
+| Large-manual open responsiveness | Fixed | Bundle read + `inspect()` moved to the `materialize` worker; 32 MiB render cache; GUI-thread re-read guard test |
+| Windows CI | Pending | Runs on `windows-2022`; this pass was developed and tested on Linux only |
+| Physical Windows acceptance | Pending | Owner to re-verify the redesigned Diagnostics page and guides on Windows |
+
+Offscreen Qt rendering is not a visual review; a packaged Windows launch and
+physical inspection remain the acceptance step. Binary publication stays deferred
+to the milestone-6 license/source audit.
+
 # Milestone 1 validation
 
 Date: 2026-10-13. Environment: Linux x86_64, Python 3.12.14, Qt 6.8.3.

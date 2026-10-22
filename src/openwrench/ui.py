@@ -5,13 +5,15 @@ import sqlite3
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
     QVBoxLayout, QWidget, QScrollArea,
 )
 
 from openwrench import __version__
 from openwrench.garage_ui import GaragePage
+from openwrench.diagnostics_ui import DiagnosticsPage
+from openwrench.library_tasks import DocumentTask
 from openwrench.storage import SCHEMA_VERSION, Store
 from openwrench.transfers import export_garage
 from openwrench.library_ui import RepairLibraryPage
@@ -46,7 +48,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(32)
         self.navigation = QListWidget()
         self.navigation.setAccessibleName('Main navigation')
-        self.navigation.addItems(['My Garage', 'Settings', 'Repair Library'])
+        self.navigation.addItems(['My Garage', 'Diagnostics', 'Repair Library', 'Settings'])
         side.addWidget(self.navigation)
         side.addWidget(label('LOCAL DATA\nNo account required', 'muted'))
         side.addWidget(label(f'Garage build {__version__}', 'muted'))
@@ -54,10 +56,13 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         layout.addWidget(self.pages, 1)
         self.pages.addWidget(self.garage_page())
-        self.pages.addWidget(self.settings_page())
+        self.diagnostics_page = DiagnosticsPage(self.store, self)
+        self.pages.addWidget(self.diagnostics_page)
         self.library_page = RepairLibraryPage(self.store, self)
         self.pages.addWidget(self.library_page)
+        self.pages.addWidget(self.settings_page())
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(lambda index: self.diagnostics_page.refresh() if index == 1 else None)
         self.navigation.currentRowChanged.connect(lambda index: self.library_page.refresh() if index == 2 else None)
         self.navigation.setCurrentRow(0)
         self.apply_theme(store.theme)
@@ -84,7 +89,14 @@ class MainWindow(QMainWindow):
         self.library_page.refresh(self.garage.current_id())
 
     def closeEvent(self, event):
+        self.diagnostics_page.stop()
         self.library_page.stop()
+        # A backup or restore worker must not outlive the window. Killing the worker
+        # is safe: SQLite rolls back an interrupted restore and the safety backup and
+        # the exclusive-create backup path both leave no partial destination file.
+        task = getattr(self, 'storage_task', None)
+        if task is not None and not task.done:
+            task.cancel('Storage operation cancelled because the window closed.')
         super().closeEvent(event)
 
     def settings_page(self) -> QWidget:
@@ -96,6 +108,14 @@ class MainWindow(QMainWindow):
         self.theme.setCurrentText(self.store.theme)
         self.theme.currentTextChanged.connect(self.change_theme)
         layout.addWidget(self.theme)
+        layout.addWidget(label('Diagnostics hardware', 'heading'))
+        self.hardware = QCheckBox('Enable experimental USB OBD-II adapter access')
+        self.hardware.setChecked(self.store.hardware_enabled)
+        self.hardware.toggled.connect(self.toggle_hardware)
+        layout.addWidget(self.hardware)
+        layout.addWidget(label('Off by default. Read-only requests only (no DTC clearing, actuation or programming). '
+                               'Real hardware compatibility is unverified and needs physical testing. The deterministic '
+                               'simulator needs no hardware.', 'muted'))
         layout.addWidget(label('Local data', 'heading'))
         path = label(str(self.store.path), 'muted')
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -170,6 +190,17 @@ class MainWindow(QMainWindow):
         self.apply_theme(self.store.theme)
         self.result.setText(f'Database restored. Previous workspace saved to: {safety}')
 
+    def toggle_hardware(self, enabled: bool) -> None:
+        try:
+            self.store.set_hardware_enabled(enabled)
+        except sqlite3.Error:
+            self.hardware.blockSignals(True)
+            self.hardware.setChecked(self.store.hardware_enabled)
+            self.hardware.blockSignals(False)
+            QMessageBox.critical(self, 'Setting unavailable', 'Unable to save the hardware setting.')
+            return
+        self.diagnostics_page.refresh()
+
     def change_theme(self, theme: str) -> None:
         try:
             self.store.set_theme(theme)
@@ -205,12 +236,56 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, 'Save database backup', 'openwrench-backup.sqlite3', 'SQLite database (*.sqlite3)')
         if not filename:
             return
-        try:
-            self.store.backup(Path(filename))
-        except (OSError, ValueError, sqlite3.Error) as error:
-            QMessageBox.critical(self, 'Backup failed', str(error))
+        # A large workspace takes seconds to copy, so run it in the worker process
+        # and keep the window responsive; the worker reports success or failure.
+        self._run_storage_task('backup', dict(destination=filename),
+            f'Backup saved: {filename}', 'Backup failed')
+
+    def choose_restore(self):
+        if self.library_page.busy:
+            QMessageBox.information(self, 'Document task active', 'Finish or cancel the document task before restoring.')
             return
-        self.result.setText(f'Backup saved: {filename}')
+        self.library_page.stop()
+        filename, _ = QFileDialog.getOpenFileName(self, 'Choose an OpenWrench backup', '', 'SQLite database (*.sqlite3 *.db);;All files (*)')
+        if not filename:
+            return
+        answer = QMessageBox.question(self, 'Replace this workspace?',
+            'Restore replaces all current vehicles, history, documents, schedules, bookmarks, settings, and VIN cache with this backup. '
+            'Schema-1 backups contain settings only; schema-2 backups contain Garage records without a Repair Library. OpenWrench validates the file and saves a safety backup before making changes. Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._run_storage_task('restore', dict(source=filename), None, 'Restore failed')
+
+    def _run_storage_task(self, operation, parameters, success_text, failure_title):
+        """Run a backup or restore in the worker process so the GUI thread never
+        blocks. The worker owns its own Store connection and commits or rolls back
+        the whole restore inside one SQLite transaction."""
+        self.storage_buttons_enabled(False)
+        self.result.setText('Backup in progress…' if operation == 'backup' else 'Restore in progress…')
+        self.storage_task = DocumentTask(self.store, operation, parameters, self)
+        def finished(result, message):
+            self.storage_buttons_enabled(True)
+            if message:
+                QMessageBox.critical(self, failure_title, message)
+                self.result.setText(failure_title + '.')
+                return
+            if operation == 'restore':
+                self.garage.refresh()
+                self.library_page.refresh()
+                self.theme.blockSignals(True)
+                self.theme.setCurrentText(self.store.theme)
+                self.theme.blockSignals(False)
+                self.apply_theme(self.store.theme)
+                self.result.setText(f'Database restored. Previous workspace saved to: {result}')
+            else:
+                self.result.setText(success_text)
+        self.storage_task.finished.connect(finished)
+        self.storage_task.start()
+
+    def storage_buttons_enabled(self, enabled):
+        self.backup_button.setEnabled(enabled)
+        self.restore_button.setEnabled(enabled)
 
     def check_database(self) -> None:
         try:

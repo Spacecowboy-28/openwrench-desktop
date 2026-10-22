@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from uuid import uuid4
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 
 class Store:
@@ -48,6 +48,20 @@ class Store:
                 with self.connection:
                     self.connection.execute('BEGIN IMMEDIATE')
                     create_html(self.connection)
+            if version < 5:
+                if version > 0:
+                    self.backup(self.path.with_name(f'{self.path.stem}.pre-v5-{uuid4().hex}.sqlite3'))
+                from openwrench.diagnostics_schema import create_diagnostics
+                with self.connection:
+                    self.connection.execute('BEGIN IMMEDIATE')
+                    create_diagnostics(self.connection)
+            if version < 6:
+                if version > 0:
+                    self.backup(self.path.with_name(f'{self.path.stem}.pre-v6-{uuid4().hex}.sqlite3'))
+                from openwrench.guide_schema import create_guides
+                with self.connection:
+                    self.connection.execute('BEGIN IMMEDIATE')
+                    create_guides(self.connection)
             self.connection.row_factory = sqlite3.Row
         except Exception:
             self.connection.close()
@@ -96,6 +110,18 @@ class Store:
             raise ValueError("Theme must be light or dark.")
         with self.connection:
             self.connection.execute("UPDATE settings SET value=? WHERE key='theme'", (theme,))
+
+    @property
+    def hardware_enabled(self) -> bool:
+        """Experimental USB adapter access is off unless the user opts in."""
+        row = self.connection.execute("SELECT value FROM settings WHERE key='hardware_enabled'").fetchone()
+        return bool(row) and row[0] == '1'
+
+    def set_hardware_enabled(self, enabled: bool) -> None:
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO settings (key,value) VALUES ('hardware_enabled',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('1' if enabled else '0',))
 
     def integrity(self) -> str:
         return self.connection.execute("PRAGMA quick_check").fetchone()[0]
@@ -162,10 +188,14 @@ class Store:
     def _replace_records(self, records):
         """Run only inside the restore transaction, using fixed table names."""
         from openwrench.library_schema import LIBRARY_TABLES, rebuild_fts
+        from openwrench.diagnostics_schema import DIAGNOSTIC_TABLES
+        from openwrench.guide_schema import GUIDE_TABLES
         self.connection.execute('DELETE FROM library_fts')
-        for table in (*reversed(LIBRARY_TABLES), 'entries', 'vehicles', 'vin_cache', 'settings'):
+        for table in (*reversed(GUIDE_TABLES), *reversed(DIAGNOSTIC_TABLES), *reversed(LIBRARY_TABLES),
+                      'entries', 'vehicles', 'vin_cache', 'settings'):
             self.connection.execute(f'DELETE FROM {table}')
-        for table in ('settings', 'vehicles', 'entries', 'vin_cache', *LIBRARY_TABLES):
+        for table in ('settings', 'vehicles', 'entries', 'vin_cache',
+                      *LIBRARY_TABLES, *DIAGNOSTIC_TABLES, *GUIDE_TABLES):
             columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info({table})')]
             placeholders = ','.join('?' for _ in columns)
             self.connection.executemany(f'INSERT INTO {table} VALUES ({placeholders})',

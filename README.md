@@ -123,8 +123,31 @@ The native development bundle appears in `dist/OpenWrench`. On Windows, run
 `OpenWrench.exe` from this directory. On Linux, run `./OpenWrench`.
 Keep the entire directory together. PyInstaller includes the Python runtime
 and Qt, so this bundled application does not require a separate Python install.
-Build on the target operating system. This is a portable development bundle,
-not a tested installer or public release. The Windows build has not run locally.
+Build on the target operating system. The Windows build has not run locally.
+
+`build_desktop.py` also renders the application icon into `build/assets` and writes
+the Windows version resource from `openwrench.__version__`. It fails if that version
+disagrees with `pyproject.toml`, so a release bump cannot leave stale metadata.
+Icons are generated, not committed: `scripts/make_icon.py` renders the PNG and a
+multi-size ICO deterministically from Qt.
+
+Package the bundle for distribution:
+
+```sh
+# Linux: relocatable tarball with a desktop entry and hicolor icons.
+python scripts/make_linux_package.py --bundle-dir dist/OpenWrench --output-dir dist
+
+# Windows: signed-ready Inno Setup installer (requires Inno Setup 6 / ISCC.exe).
+python scripts/make_installer.py --source-dir dist/OpenWrench --output-dir dist
+```
+
+The Linux archive extracts to `openwrench/`; `sh install.sh` installs into
+`~/.local` (or `$PREFIX`, e.g. `/usr/local` under `sudo`). The Windows installer
+defaults to a per-machine `Program Files` location but permits a per-user install.
+Neither uninstaller touches your workspace: the Windows uninstaller asks before
+deleting `%LOCALAPPDATA%\OpenWrench\OpenWrench` and defaults to keeping it.
+Inno Setup is a Windows tool; `make_installer.py` exits with a clear message and
+non-zero status when `ISCC.exe` is unavailable rather than producing a partial artifact.
 
 Smoke-test an isolated workspace:
 
@@ -189,13 +212,16 @@ Backing up/restoring a large SQLite file still runs synchronously in Settings.
 Replacing the application directory leaves
 user data intact. No automatic updater exists yet. Logs rotate at 500 KB with
 two retained copies. They record application lifecycle events, not VINs or scans.
-No installer or uninstaller currently runs.
+The Windows uninstaller removes program files only; it prompts before deleting
+your workspace and defaults to keeping it. The Linux `install.sh` writes only
+under `$PREFIX` and never removes user data.
 
 ## Project map
 
 - `src/openwrench`: native UI, storage, lifecycle, provider and adapter contracts
-- `tests`: persistence, backup failures, real Qt interaction, and launch tests
-- `scripts`: same-platform desktop packaging
+- `tests`: persistence, backup failures, real Qt interaction, launch and packaging tests
+- `scripts`: icon/version generation, same-platform desktop packaging and installers
+- `installer`: Inno Setup script and Linux desktop entry
 - `examples`: four development profiles with unknown fields left null
 - `schemas`: data-contribution design boundary for milestone 3
 - `docs/ARCHITECTURE.md`: stack decision and component boundaries
@@ -216,11 +242,38 @@ docs/MILESTONE_3.md for scope, tests and remaining work.
 
 ## Offline HTML manuals (Milestone 3 extension)
 
-Use **Import PDF / HTML / ZIP** in Repair Library. Select an HTML/HTM entry page
-inside a local folder, or a ZIP containing a manual. An entry-page import collects
-reachable files below its parent directory only; use ZIP for a full supplied
-folder tree. Originals remain untouched. Enter source, rights and vehicle
-associations yourself; a title is not proof of completeness or vehicle fit.
+Use **Import PDF / HTML / ZIP** in Repair Library for a PDF, an HTML/HTM entry
+page, or a ZIP containing a manual. Use **Import HTML Folder** to select an
+entire manual folder — the folder tree, nested subfolders, stylesheets, images
+and other supporting files are collected automatically, so you do not have to
+pick files one at a time. Originals remain untouched; nothing is written into or
+deleted from the selected folder.
+
+**Import HTML Folder** walks the selected directory (never following a symlink
+or Windows junction) and imports every permitted file with its relative path, so
+navigation links, images and stylesheets keep working. Pages that no other page
+links to are imported and indexed too, so you can reach the complete manual from
+the section list. The entry page is `index.html`/`index.htm` when present,
+otherwise `default`/`toc`, otherwise the shallowest page; if the choice is
+ambiguous OpenWrench says which page it used and why. After a folder import an
+**Import report** explains anything the offline viewer cannot show: missing
+files and anchors, external URLs, files that were stored but not displayed
+(scripts, web fonts, data files), files the bundle cannot store, and items
+skipped for safety. A folder with no HTML pages is rejected with a clear message
+rather than importing nothing.
+
+ZIP import applies the same rule: ordinary files a manual ships that the viewer
+cannot use (`Thumbs.db`, `desktop.ini`, `.DS_Store`, RTF or extensionless
+resources) are skipped and reported rather than failing the whole import, while
+unsafe or malicious entries (path traversal, absolute paths, Windows device
+names, symlinks, encrypted, duplicated or case-aliased entries) are still
+rejected. macOS `__MACOSX/` sidecars and AppleDouble `._*` forks are ignored as
+metadata, so they can never masquerade as a second `index.html`.
+
+An HTML entry-page import collects reachable files below its parent directory
+only; use **Import HTML Folder** for a full supplied folder tree. Enter source,
+rights and vehicle associations yourself; a title is not proof of completeness or
+vehicle fit.
 
 **Open document** provides static HTML navigation, Back/Forward/Home, section
 selection, zoom and section bookmarks. Search results show the document UUID
@@ -236,13 +289,21 @@ unsupported. Fonts and other accepted supporting files remain in the stored
 bundle but do not gain execution or arbitrary file access. No WebEngine is needed
 for this static scope. User manuals are never scraped or included in the repo.
 
-ZIP limits: 50 MiB compressed, 100 MiB expanded, 10 MiB per member, 2,000 entries,
-200:1 expansion above 1 MiB, 5,000 indexed sections and 20 MiB text. Unsupported
+Bundle limits: 128 MiB stored, 100 MiB expanded, 10 MiB per member, 2,000 entries,
+5,000 indexed sections and 20 MiB text. A folder import additionally bounds the
+walk at 20,000 directory entries and 32 nesting levels. Exceeding any limit stops
+the import with a message naming the limit, so no partial manual is stored. A
+declared ZIP size above the budget rejects the archive; a header that lies about
+its size is caught when the member is read,
+so no compression-ratio heuristic is applied and repetitive generated manuals
+(torque tables, repeated inline styles) import normally. Unsupported
 member extensions reject the archive with a filename. HTML/HTM, CSS, common raster
 images, SVG, JS, TXT, font files, JSON/XML/Markdown/source maps are accepted as
 stored data; only sanitized HTML/CSS and approved images are rendered. Unsafe
 paths, links, special files, Windows aliases, duplicate names and encrypted
-entries reject the archive. Imports run in cancellable worker processes.
+entries reject the archive. Imports run in cancellable worker processes; bundle
+reading and reference inspection also run in the worker so opening a large manual
+never blocks the interface.
 
 Schema 4 adds document format and stable HTML section mappings. Existing PDFs
 retain their IDs/bookmarks. Upgrade creates a pre-v4 SQLite backup; complete
