@@ -101,9 +101,16 @@ class Library:
             self.db.execute('DELETE FROM document_vehicles WHERE document_id=?', (identifier,))
             self.db.executemany('INSERT INTO document_vehicles VALUES (?,?)', [(identifier, v) for v in set(vehicles)])
 
-    def import_document(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False):
-        if Path(source).suffix.lower() in ('.html','.htm','.zip'):
-            return self.import_html(source, data, vehicles, progress, cancelled)
+    def import_document(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False, notice=None):
+        path = Path(source)
+        if path.is_dir() or path.suffix.lower() in ('.html','.htm','.zip'):
+            identifier, report = self.import_html(source, data, vehicles, progress, cancelled)
+            # Optional out-parameter keeps the historical single-identifier return
+            # value while still letting the worker carry the import report.
+            if notice is not None:
+                notice.clear()
+                if report: notice.update(report)
+            return identifier
         from openwrench.pdf_engine import extract
         values = metadata(data)
         for vehicle in vehicles:
@@ -136,10 +143,14 @@ class Library:
         return identifier
 
     def import_html(self, source, data, vehicles, progress=lambda *a: None, cancelled=lambda: False):
-        from openwrench.html_bundle import import_source, pack, index
+        from openwrench.html_bundle import import_source, read_bundle_folder, pack, index
         values = metadata(data)
         for vehicle in vehicles: Garage(self.store).vehicle(vehicle)
-        files = import_source(source, cancelled)
+        # A folder import reuses the same bundle pipeline; only the reader differs.
+        if Path(source).is_dir() and not Path(source).is_symlink():
+            files, report = read_bundle_folder(source, cancelled, progress)
+        else:
+            files, report = import_source(source, cancelled), None
         progress(1,3)
         content, sections = pack(files), index(files)
         digest = hashlib.sha256(content).hexdigest()
@@ -156,7 +167,7 @@ class Library:
             self.db.executemany('INSERT INTO document_vehicles VALUES (?,?)',[(identifier,v) for v in set(vehicles)])
             self._html_index(identifier,sections)
         progress(3,3)
-        return identifier
+        return identifier, report
 
     def _html_index(self, identifier, sections):
         self._pages(identifier,[s['text'] for s in sections])

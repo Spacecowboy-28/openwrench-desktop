@@ -154,8 +154,23 @@ No data from a model response substitutes for manufacturer technical information
 
 ### Static HTML bundles
 
-`html_bundle.py` validates bounded ZIP entries and reachable local HTML resources,
-canonicalizes bundles, indexes stable file/anchor sections and audits references.
+`html_bundle.py` validates bounded ZIP entries, walks a selected manual folder,
+and resolves reachable local HTML resources; it canonicalizes bundles, indexes
+stable file/anchor sections and audits references.
+
+Folder import (`read_bundle_folder`) is the whole-tree counterpart to ZIP import.
+It walks with `os.scandir` in the worker, never following a symlink or Windows
+reparse point (junction/mount), and requires every resolved path to stay under the
+chosen root, so a link cannot pull in files outside the manual. It keeps relative
+paths, skips files whose names fail `safe_path`, records a skipped report instead
+of failing the whole import, and enforces `MAX_FILES`/`MAX_TOTAL`/`MAX_FILE`,
+`MAX_ENTRIES` and `MAX_DEPTH` so a huge or hostile tree stops with a named limit.
+`entry_page` prefers `index`/`default`/`toc`, then the shallowest page, and returns
+a human explanation when the choice is ambiguous. Files the viewer cannot display
+but can store (scripts, fonts, data) are kept and reported; formats the bundle
+cannot store are reported separately. The walk reads bytes but never writes,
+moves or deletes inside the source folder.
+
 Schema 4 retains original canonical ZIP bytes in `document_files`; `html_sections`
 maps FTS page integers and bookmarks to paths/anchors. Existing schema-3 DDL stays
 unchanged so strict restore validation recognizes old backups. Migration adds a

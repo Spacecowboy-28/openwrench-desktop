@@ -9,7 +9,8 @@ import zipfile
 import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QTextDocument, QImage
-from openwrench.html_bundle import read_zip, pack, resolve, inspect, StaticHTML, safe_svg, import_source
+from openwrench.html_bundle import (read_zip, pack, resolve, inspect, StaticHTML, safe_svg, import_source,
+                                    read_bundle_folder, entry_page, folder_report_text)
 from openwrench.html_ui import OfflineBrowser, HtmlViewer
 from openwrench.library import Library
 from openwrench.garage import Garage
@@ -337,6 +338,214 @@ def test_cancel_after_parsing_is_atomic(library,tmp_path):
     def progress(*args):cancel[0]=True
     with pytest.raises(InterruptedError):lib.import_document(source,details(),[vehicle],progress,lambda:cancel[0])
     assert lib.documents()==[] and source.is_file()
+
+
+def synthetic_folder(root, pages=None, assets=True):
+    """A nested offline manual folder. Original content only."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root/'index.html').write_bytes(
+        b'<link rel="stylesheet" href="assets/style.css"><h1>Original training manual</h1>'
+        b'<a href="procedures/brake.htm#check">Inspect brakes</a><img src="assets/diagram.svg">'
+        b'<a href="procedures/engine/head.htm">Cylinder head</a>'
+        b'<a href="orphan/deep/extra.htm">Unlinked extra page</a>'
+        b'<a href="missing.htm">Absent procedure</a><script src="assets/app.js">secret_script</script>')
+    (root/'procedures').mkdir(exist_ok=True)
+    (root/'procedures'/'brake.htm').write_bytes(
+        b'<a href="../index.html">Home</a><h2 id="check">Synthetic caliper inspection</h2>'
+        b'<p>Measure fictional clearance.</p><img src="../assets/diagram.svg">')
+    (root/'procedures'/'engine').mkdir(exist_ok=True)
+    (root/'procedures'/'engine'/'head.htm').write_bytes(b'<h2>Fictional head torque</h2><p>Original text.</p>')
+    # A page no other page links to: it must still be imported and be browsable.
+    (root/'orphan'/'deep').mkdir(parents=True, exist_ok=True)
+    (root/'orphan'/'deep'/'extra.htm').write_bytes(b'<h2>Unlinked extra page</h2><p>Reachable only from the section list.</p>')
+    if assets:
+        (root/'assets').mkdir(exist_ok=True)
+        (root/'assets'/'style.css').write_bytes(b'h1 {color: blue}')
+        (root/'assets'/'diagram.svg').write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg" width="60" height="40"><rect x="2" y="2" width="40" height="20" fill="blue"/></svg>')
+        (root/'assets'/'app.js').write_bytes(b'fetch("https://example.invalid")')
+    return root
+
+
+def test_folder_import_nested_assets_and_unlinked_pages(library,tmp_path):
+    lib,vehicle=library
+    folder=synthetic_folder(tmp_path/'manual')
+    report={}
+    identifier=lib.import_document(folder,details(),[vehicle],notice=report)
+    assert report['entry']=='index.html'
+    files=lib.html_files(identifier)
+    # Nested, unlinked and asset files are all preserved with their relative paths.
+    for name in ('index.html','procedures/brake.htm','procedures/engine/head.htm',
+                 'orphan/deep/extra.htm','assets/style.css','assets/diagram.svg'):
+        assert name in files, name
+    assert lib.search('fictional clearance',vehicle)[0]['id']==identifier
+    # The unlinked page is indexed, so it is reachable from the section list.
+    assert any(s['path']=='orphan/deep/extra.htm' for s in lib.html_sections(identifier))
+    # The original folder is untouched.
+    assert (folder/'index.html').is_file() and (folder/'orphan'/'deep'/'extra.htm').is_file()
+
+
+def test_folder_import_preserves_links_and_blocks_external(tmp_path):
+    files,report=read_bundle_folder(synthetic_folder(tmp_path/'manual'))
+    html=StaticHTML('index.html',files)
+    rendered=''.join(html.output)
+    assert 'bundle:/procedures/brake.htm#check' in rendered
+    assert 'bundle:/assets/diagram.svg' in rendered
+    assert 'example.invalid' not in rendered and '<script' not in rendered.lower()
+    assert any(i['reason']=='Missing resource' for i in inspect(files))
+
+
+def test_folder_import_entry_page_detection(tmp_path):
+    # index.htm is honoured when there is no index.html.
+    folder=tmp_path/'manual';folder.mkdir()
+    (folder/'index.htm').write_text('<h1>Contents</h1><a href="a.htm">A</a>')
+    (folder/'a.htm').write_text('<p>A</p>')
+    files,_=read_bundle_folder(folder)
+    assert entry_page(files)[0]=='index.htm'
+    # Missing index: the shallowest page is chosen and the ambiguity is explained.
+    other=tmp_path/'other';other.mkdir()
+    (other/'zeta.htm').write_text('<p>Z</p>')
+    (other/'alpha.htm').write_text('<p>A</p>')
+    files,_=read_bundle_folder(other)
+    entry,note=entry_page(files)
+    assert entry=='alpha.htm' and 'No index.html' in note
+    assert 'alpha.htm' in folder_report_text(dict(entry=entry,notes=[note]))
+    # Ambiguous: two index.html files are reported rather than silently picked.
+    ambiguous=tmp_path/'ambiguous';ambiguous.mkdir()
+    (ambiguous/'index.html').write_text('<p>root</p>')
+    (ambiguous/'sub').mkdir();(ambiguous/'sub'/'index.html').write_text('<p>sub</p>')
+    files,_=read_bundle_folder(ambiguous)
+    entry,note=entry_page(files)
+    assert entry=='index.html' and 'Multiple' in note
+
+
+def test_folder_import_reports_unusable_content(tmp_path):
+    folder=synthetic_folder(tmp_path/'manual')
+    (folder/'assets'/'nav.js').write_bytes(b'buildMenu()')
+    (folder/'procedures'/'dynamic.php').write_bytes(b'<?php echo "x";')
+    (folder/'assets'/'font.woff2').write_bytes(b'wOF2')
+    (folder/'procedures'/'notes.xyz').write_bytes(b'opaque')
+    files,report=read_bundle_folder(folder)
+    # Storable but unusable files are kept so the bundle mirrors the folder, and
+    # reported so the user is never told a script-driven manual is complete.
+    assert 'assets/nav.js' in report['inactive'] and 'assets/font.woff2' in report['inactive']
+    assert 'assets/nav.js' in files and 'assets/font.woff2' in files
+    # Files the bundle cannot store are reported separately and not imported.
+    assert 'procedures/dynamic.php' in report['unsupported']
+    assert 'procedures/notes.xyz' in report['unsupported']
+    assert not any(n.endswith(('.php','.xyz')) for n in files)
+    text=folder_report_text(report)
+    assert 'JavaScript' in text and 'not displayed by the static viewer' in text
+    # A JavaScript-only entry page is called out explicitly.
+    shell=tmp_path/'shell';shell.mkdir()
+    (shell/'index.html').write_bytes(b'<script src="app.js"></script>')
+    (shell/'app.js').write_bytes(b'document.write("manual")')
+    _,report=read_bundle_folder(shell)
+    assert any('JavaScript' in note for note in report['notes'])
+    assert any('empty' in note.lower() for note in report['notes'])
+
+
+def test_folder_import_skips_unsafe_entries_and_symlinks(tmp_path):
+    folder=synthetic_folder(tmp_path/'manual')
+    outside=tmp_path/'outside.html';outside.write_text('Private page')
+    linked=folder/'linked.html'
+    try:
+        linked.symlink_to(outside)
+        made_symlink=True
+    except OSError:
+        made_symlink=False
+    files,report=read_bundle_folder(folder)
+    assert 'linked.html' not in files
+    if made_symlink:
+        assert any(row['path']=='linked.html' for row in report['skipped'])
+        assert any('symbolic link' in row['reason'] for row in report['skipped'])
+    assert 'Private page' not in ''.join(v.decode('utf-8','replace') for v in files.values())
+
+
+def test_folder_import_enforces_limits(tmp_path,monkeypatch):
+    from openwrench import html_bundle
+    folder=synthetic_folder(tmp_path/'manual')
+    monkeypatch.setattr(html_bundle,'MAX_FILES',3)
+    with pytest.raises(ValueError,match='supported files'):read_bundle_folder(folder)
+    monkeypatch.undo()
+    monkeypatch.setattr(html_bundle,'MAX_TOTAL',10)
+    with pytest.raises(ValueError,match='total-size'):read_bundle_folder(folder)
+    monkeypatch.undo()
+    monkeypatch.setattr(html_bundle,'MAX_FILE',8)
+    with pytest.raises(ValueError,match='per-file'):read_bundle_folder(folder)
+    monkeypatch.undo()
+    monkeypatch.setattr(html_bundle,'MAX_DEPTH',2)
+    with pytest.raises(ValueError,match='nesting'):read_bundle_folder(folder)
+    monkeypatch.undo()
+    monkeypatch.setattr(html_bundle,'MAX_ENTRIES',4)
+    with pytest.raises(ValueError,match='entries'):read_bundle_folder(folder)
+
+
+def test_folder_import_requires_html_and_is_cancellable(tmp_path):
+    empty=tmp_path/'empty';empty.mkdir();(empty/'notes.txt').write_text('no pages')
+    with pytest.raises(ValueError,match='no HTML'):read_bundle_folder(empty)
+    with pytest.raises(ValueError,match='Choose an HTML folder'):read_bundle_folder(tmp_path/'absent')
+    folder=synthetic_folder(tmp_path/'manual')
+    with pytest.raises(InterruptedError):read_bundle_folder(folder,cancelled=lambda:True)
+
+
+def test_folder_import_is_deduplicated_and_reindexable(library,tmp_path):
+    lib,vehicle=library
+    folder=synthetic_folder(tmp_path/'manual')
+    report={}
+    identifier=lib.import_document(folder,details(),[vehicle],notice=report)
+    assert report['entry']=='index.html'
+    with pytest.raises(ValueError,match='already exists'):lib.import_document(folder,details(),[vehicle])
+    # Reindex rebuilds the same sections from the stored bundle.
+    before=lib.html_sections(identifier)
+    lib.reindex(identifier)
+    assert lib.html_sections(identifier)==before
+    # A folder and its zipped form are the same document.
+    archive=tmp_path/'manual.zip';archive.write_bytes(pack(lib.html_files(identifier)))
+    with pytest.raises(ValueError,match='already exists'):lib.import_document(archive,details(),[vehicle])
+
+
+def test_folder_import_large_manual_stays_off_gui_thread(library,tmp_path,app,monkeypatch):
+    """A big nested folder must import with a bounded GUI-thread footprint."""
+    lib,vehicle=library
+    folder=tmp_path/'big';folder.mkdir()
+    for n in range(400):
+        sub=folder/f'section{n//50:02d}';sub.mkdir(exist_ok=True)
+        (sub/f'page{n:03d}.html').write_bytes(f'<h2>Section {n}</h2><p>Original text {n}.</p><a href="../index.html">Home</a>'.encode())
+    (folder/'index.html').write_bytes(b'<h1>Big original manual</h1><a href="section00/page000.html">Start</a>')
+    seen=[]
+    report={}
+    identifier=lib.import_document(folder,details(),[vehicle],lambda n,total:seen.append((n,total)),notice=report)
+    assert report['entry']=='index.html' and seen
+    assert len(lib.html_sections(identifier))>=401
+    assert lib.search('Original text 250',vehicle)[0]['id']==identifier
+
+
+def test_worker_reports_folder_notice_without_gui_reparse(library,tmp_path):
+    """The worker must carry the import report so the GUI need not re-read the folder."""
+    from openwrench.pdf_worker import main as worker_main
+    import json
+    lib,vehicle=library
+    folder=synthetic_folder(tmp_path/'manual')
+    (folder/'assets'/'nav.js').write_bytes(b'menu()')
+    job=tmp_path/'job.json'
+    job.write_text(json.dumps(dict(database=str(lib.store.path),operation='import',source=str(folder),
+                                   metadata=details(),vehicles=[vehicle],output=str(tmp_path/'render.raw'))))
+    assert worker_main([str(job)])==0
+
+
+def test_folder_import_via_viewer_opens_entry_page(library,tmp_path,app):
+    lib,vehicle=library
+    folder=synthetic_folder(tmp_path/'manual')
+    report={}
+    identifier=lib.import_document(folder,details(),[vehicle],notice=report)
+    viewer=HtmlViewer(lib,identifier)
+    viewer.task.process.waitForFinished(30000)
+    for _ in range(200):
+        app.processEvents()
+        if viewer.browser.files:break
+    assert 'index.html' in viewer.browser.files
+    assert 'orphan/deep/extra.htm' in viewer.browser.files
+    viewer.close()
 
 
 def test_local_symlink_is_rejected(tmp_path):

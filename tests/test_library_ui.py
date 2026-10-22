@@ -122,3 +122,52 @@ def test_recall_cancel_ignores_stale_reply(app):
     client.fetch(dict(year=2001,make='Toyota',model='Tundra'))
     client.cancel();reply.finished.emit()
     assert reply.aborted and not received
+
+
+def test_folder_import_action_imports_and_reports(app,tmp_path,monkeypatch):
+    """The new action must import a whole nested folder and explain limitations."""
+    from PySide6.QtWidgets import QFileDialog
+    from openwrench.library_ui import RepairLibraryPage
+    from test_html_library import synthetic_folder
+    class _Field:
+        def setText(self,*a):pass
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        vehicle=Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        window=MainWindow(store);window.show();window.open_vehicle_library()
+        page=window.library_page
+        assert 'Import HTML Folder' in [b.text() for b in page.document_buttons]
+        folder=synthetic_folder(tmp_path/'manual')
+        (folder/'assets'/'nav.js').write_bytes(b'menu()')
+        monkeypatch.setattr(QFileDialog,'getExistingDirectory',staticmethod(lambda *a,**k:str(folder)))
+        class FakeDialog:
+            def __init__(self,*a,**k):self.fields={'title':_Field()}
+            def exec(self):return True
+            @property
+            def payload(self):return (dict(details(),applicability='{}'),[vehicle])
+        monkeypatch.setattr('openwrench.library_ui.DocumentDialog',FakeDialog)
+        shown=[]
+        monkeypatch.setattr(RepairLibraryPage,'show_notice',lambda self,notice:shown.append(notice))
+        page.import_folder()
+        wait_for(app,lambda:not page.busy)
+        assert page.documents.count()==1,page.status.text()
+        assert shown and shown[0]['entry']=='index.html'
+        assert 'assets/nav.js' in shown[0]['inactive']
+        assert any('JavaScript' in note for note in shown[0]['notes'])
+        identifier=page.selected_document()[0]
+        assert page.library.document(identifier)['format']=='html'
+        window.close()
+
+
+def test_folder_import_cancel_leaves_no_partial_document(app,tmp_path):
+    from test_html_library import synthetic_folder
+    with closing(Store(tmp_path/'ui.sqlite3')) as store:
+        vehicle=Garage(store).save_vehicle(dict(year=2020,make='Honda',model='Civic'))
+        window=MainWindow(store);window.show();window.open_vehicle_library()
+        page=window.library_page
+        folder=synthetic_folder(tmp_path/'manual')
+        page.run_task('import',dict(source=str(folder),metadata=details(),vehicles=[vehicle]))
+        page.cancel.click()
+        wait_for(app,lambda:not page.busy)
+        assert page.documents.count()==0,page.status.text()
+        assert (folder/'index.html').is_file()
+        window.close()

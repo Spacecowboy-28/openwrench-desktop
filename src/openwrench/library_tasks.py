@@ -23,7 +23,7 @@ class DocumentTask(QObject):
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(lambda:self.cancel('Document operation timed out.'))
-        self.buffer,self.result,self.error,self.done,self.bundle = '',None,'',False,None
+        self.buffer,self.result,self.error,self.done,self.bundle,self.notice = '',None,'',False,None,None
 
     def start(self):
         file=self.directory/'job.json'
@@ -43,6 +43,7 @@ class DocumentTask(QObject):
                 if 'progress' in value:self.progress.emit(value['progress'],value['total'])
                 if 'result' in value:self.result=value['result']
                 if 'bundle' in value:self.bundle=value['bundle']
+                if 'notice' in value:self.notice=value['notice']
                 if 'error' in value:self.error=value['error']
             except (ValueError,TypeError):
                 self.error='Invalid document worker response.'

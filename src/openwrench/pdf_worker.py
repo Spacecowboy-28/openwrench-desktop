@@ -16,7 +16,10 @@ def main(arguments):
             library = Library(store)
             operation = job['operation']
             if operation == 'import':
-                result = library.import_document(job['source'],job['metadata'],job['vehicles'],progress)
+                notice = {}
+                result = library.import_document(job['source'],job['metadata'],job['vehicles'],progress,notice=notice)
+                if notice:
+                    print(json.dumps(dict(notice=notice)),flush=True)
             elif operation == 'index':
                 library.reindex(job['id'],progress)
                 result = job['id']

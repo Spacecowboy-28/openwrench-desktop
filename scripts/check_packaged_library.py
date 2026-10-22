@@ -8,7 +8,7 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
 from test_library import synthetic_pdf,details
-from test_html_library import synthetic_html
+from test_html_library import synthetic_html,synthetic_folder
 from openwrench.storage import Store
 from openwrench.library import Library
 
@@ -43,7 +43,24 @@ def main():
         restored=Store(directory/'restored.sqlite3');restored.restore(backup)
         assert Library(restored).local_path(html).is_dir()
         restored.close()
-        print('Packaged PDF render and HTML ZIP import, search, extraction and portable restore passed.')
+        folder=synthetic_folder(directory/'manual')
+        (folder/'assets'/'nav.js').write_bytes(b'menu()')
+        request=directory/'folder.json'
+        request.write_text(json.dumps(dict(operation='import',source=str(folder),metadata=details(),vehicles=[],database=str(database))),'utf-8')
+        result=subprocess.run([str(executable),'--pdf-worker',str(request)],capture_output=True,text=True,timeout=60,check=True)
+        messages=[json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+        notice=[m['notice'] for m in messages if 'notice' in m]
+        assert notice and notice[0]['entry']=='index.html',notice
+        assert 'assets/nav.js' in notice[0]['inactive']
+        store=Store(database)
+        library=Library(store)
+        folder_ids=[d['id'] for d in library.documents() if d['format']=='html']
+        assert len(folder_ids)==2
+        newest=next(i for i in folder_ids if 'orphan/deep/extra.htm' in library.html_files(i))
+        assert 'procedures/engine/head.htm' in library.html_files(newest)
+        assert library.search('fictional clearance')[0]['id']==newest
+        store.close()
+        print('Packaged PDF render and HTML ZIP and folder import, search, extraction and portable restore passed.')
 
 
 if __name__=='__main__':main()

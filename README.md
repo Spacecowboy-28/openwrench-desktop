@@ -216,11 +216,30 @@ docs/MILESTONE_3.md for scope, tests and remaining work.
 
 ## Offline HTML manuals (Milestone 3 extension)
 
-Use **Import PDF / HTML / ZIP** in Repair Library. Select an HTML/HTM entry page
-inside a local folder, or a ZIP containing a manual. An entry-page import collects
-reachable files below its parent directory only; use ZIP for a full supplied
-folder tree. Originals remain untouched. Enter source, rights and vehicle
-associations yourself; a title is not proof of completeness or vehicle fit.
+Use **Import PDF / HTML / ZIP** in Repair Library for a PDF, an HTML/HTM entry
+page, or a ZIP containing a manual. Use **Import HTML Folder** to select an
+entire manual folder — the folder tree, nested subfolders, stylesheets, images
+and other supporting files are collected automatically, so you do not have to
+pick files one at a time. Originals remain untouched; nothing is written into or
+deleted from the selected folder.
+
+**Import HTML Folder** walks the selected directory (never following a symlink
+or Windows junction) and imports every permitted file with its relative path, so
+navigation links, images and stylesheets keep working. Pages that no other page
+links to are imported and indexed too, so you can reach the complete manual from
+the section list. The entry page is `index.html`/`index.htm` when present,
+otherwise `default`/`toc`, otherwise the shallowest page; if the choice is
+ambiguous OpenWrench says which page it used and why. After a folder import an
+**Import report** explains anything the offline viewer cannot show: missing
+files and anchors, external URLs, files that were stored but not displayed
+(scripts, web fonts, data files), files the bundle cannot store, and items
+skipped for safety. A folder with no HTML pages is rejected with a clear message
+rather than importing nothing.
+
+An HTML entry-page import collects reachable files below its parent directory
+only; use **Import HTML Folder** for a full supplied folder tree. Enter source,
+rights and vehicle associations yourself; a title is not proof of completeness or
+vehicle fit.
 
 **Open document** provides static HTML navigation, Back/Forward/Home, section
 selection, zoom and section bookmarks. Search results show the document UUID
@@ -236,9 +255,12 @@ unsupported. Fonts and other accepted supporting files remain in the stored
 bundle but do not gain execution or arbitrary file access. No WebEngine is needed
 for this static scope. User manuals are never scraped or included in the repo.
 
-ZIP limits: 128 MiB stored, 100 MiB expanded, 10 MiB per member, 2,000 entries,
-5,000 indexed sections and 20 MiB text. A declared size above the budget rejects
-the archive; a header that lies about its size is caught when the member is read,
+Bundle limits: 128 MiB stored, 100 MiB expanded, 10 MiB per member, 2,000 entries,
+5,000 indexed sections and 20 MiB text. A folder import additionally bounds the
+walk at 20,000 directory entries and 32 nesting levels. Exceeding any limit stops
+the import with a message naming the limit, so no partial manual is stored. A
+declared ZIP size above the budget rejects the archive; a header that lies about
+its size is caught when the member is read,
 so no compression-ratio heuristic is applied and repetitive generated manuals
 (torque tables, repeated inline styles) import normally. Unsupported
 member extensions reject the archive with a filename. HTML/HTM, CSS, common raster
