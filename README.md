@@ -306,8 +306,8 @@ the import with a message naming the limit, so no partial manual is stored. A
 declared ZIP size above the budget rejects the archive; a header that lies about
 its size is caught when the member is read,
 so no compression-ratio heuristic is applied and repetitive generated manuals
-(torque tables, repeated inline styles) import normally. Unsupported
-member extensions reject the archive with a filename. HTML/HTM, CSS, common raster
+(torque tables, repeated inline styles) import normally. Unsupported ordinary
+files are skipped and named in the import report. HTML/HTM, CSS, common raster
 images, SVG, JS, TXT, font files, JSON/XML/Markdown/source maps are accepted as
 stored data; only sanitized HTML/CSS and approved images are rendered. Unsafe
 paths, links, special files, Windows aliases, duplicate names and encrypted
@@ -319,8 +319,8 @@ Schema 4 adds document format and stable HTML section mappings. Existing PDFs
 retain their IDs/bookmarks. Upgrade creates a pre-v4 SQLite backup; complete
 backups contain bundles and restore recreates missing managed viewing folders.
 JSON and CSV export metadata/section paths only, never manual text or resources.
-Resource reports are recomputed from the stored bundle. Large bundle inspection
-and page rendering still have bounded synchronous UI work.
+Resource reports are recomputed in the worker from the stored bundle; sanitized
+page rendering still has bounded synchronous UI work.
 
 See [Milestone 3 acceptance](docs/MILESTONE_3.md) for Windows update instructions
 and the offline HTML/PDF acceptance checklist.

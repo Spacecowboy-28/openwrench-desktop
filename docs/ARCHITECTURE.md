@@ -97,12 +97,16 @@ Packaging is code, not checked-in blobs, so no binary can drift from its source:
 - `installer/openwrench.iss` is a static Inno Setup 6 script; the build script
   injects the version and source directory as `/D` defines.
 - `scripts/make_installer.py` and `scripts/make_linux_package.py` assemble the
-  Windows installer and the relocatable Linux tarball.
+  Windows installer and the relocatable Linux tarball. The installer also emits
+  a SHA-256 file. Windows CI builds the original and current applications, then
+  `check_windows_installer.py` exercises install, version upgrade, installed
+  PDF/HTML/restore workers and silent uninstall under an isolated user account.
 
 Data preservation is a packaging invariant, not an installer option: the workspace
 lives under Qt's `AppLocalDataLocation`, never the install directory. The Windows
 uninstaller deletes program files only and asks before removing the workspace,
-defaulting to No. The Linux `install.sh` writes solely under `$PREFIX`.
+defaulting to No. Silent uninstall always retains the workspace. Installation is
+per-user without elevation. The Linux `install.sh` writes solely under `$PREFIX`.
 
 Data lives outside the installation directory. Database migrations run before
 window construction. Reject newer schema versions. Before future destructive
